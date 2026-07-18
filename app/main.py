@@ -75,28 +75,25 @@ def home(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/fragments")
 def create_fragment(
-    audio: UploadFile = File(...),
-    raw_transcript: str = Form(""),
+    raw_transcript: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    code = next_fragment_code(db)
-    suffix = Path(audio.filename or "recording.webm").suffix or ".webm"
-    safe_name = f"{code}-{uuid.uuid4().hex}{suffix}"
-    destination = AUDIO_DIR / safe_name
-    with destination.open("wb") as output:
-        shutil.copyfileobj(audio.file, output)
+    text = raw_transcript.strip()
+    if not text:
+        raise HTTPException(400, "Fragment text cannot be empty")
 
+    code = next_fragment_code(db)
     fragment = Fragment(
         fragment_code=code,
         title="Untitled fragment",
-        raw_transcript=raw_transcript.strip(),
-        audio_path=safe_name,
-        audio_mime_type=audio.content_type or "audio/webm",
+        raw_transcript=text,
+        audio_path="",
+        audio_mime_type="",
     )
     db.add(fragment)
     db.commit()
     db.refresh(fragment)
-    return {"id": fragment.id, "fragment_code": fragment.fragment_code, "url": f"/fragments/{fragment.id}"}
+    return RedirectResponse(f"/fragments/{fragment.id}", status_code=303)
 
 
 @app.get("/fragments/{fragment_id}", response_class=HTMLResponse)

@@ -2,11 +2,26 @@
 {% block content %}
 <section class="recorder-card">
   <p class="eyebrow">NEW FRAGMENT</p>
-  <h1>Press once. Speak. Press again.</h1>
-  <button id="recordButton" class="mic-button" aria-label="Start recording">●</button>
-  <p id="recordStatus">Ready</p>
-  <p id="liveTranscript" class="transcript-preview"></p>
+  <h1>Write a new fragment</h1>
+
+  <form method="post" action="/api/fragments">
+    <label class="fragment-entry-label" for="fragmentText">Fragment text</label>
+    <textarea
+      id="fragmentText"
+      name="raw_transcript"
+      rows="16"
+      required
+      autofocus
+      placeholder="Type, paste, or use Apple Dictation…"></textarea>
+
+    <button class="save-button" type="submit">Save Fragment</button>
+  </form>
+
+  <p class="hint">
+    Type normally, paste copied text, or use the microphone on the Apple keyboard.
+  </p>
 </section>
+
 <section class="library">
   <h2>Fragments</h2>
   {% if fragments %}
@@ -17,7 +32,8 @@
       <small>{{ f.created_at.strftime('%d %b %Y') }}</small>
     </a>
     {% endfor %}
-  {% else %}<p>No fragments yet.</p>{% endif %}
+  {% else %}
+    <p>No fragments yet.</p>
+  {% endif %}
 </section>
 {% endblock %}
-{% block scripts %}<script src="/static/recorder.js"></script>{% endblock %}

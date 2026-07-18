@@ -6,7 +6,9 @@
     <div><p class="eyebrow">{{ fragment.fragment_code }}</p><h1>{{ fragment.title }}</h1></div>
     <a class="secondary-button" href="/fragments/{{ fragment.id }}/export">Export Markdown</a>
   </div>
+  {% if fragment.audio_path %}
   <audio controls preload="metadata" src="/audio/{{ fragment.id }}"></audio>
+  {% endif %}
   {% if request.query_params.get('saved') %}<p class="saved">Saved.</p>{% endif %}
   <form method="post">
     <label>Title<input name="title" value="{{ fragment.title }}" required></label>

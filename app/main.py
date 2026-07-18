@@ -75,6 +75,7 @@ def home(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/fragments")
 def create_fragment(
+    title: str = Form("Untitled fragment"),
     raw_transcript: str = Form(...),
     db: Session = Depends(get_db),
 ):
@@ -85,7 +86,7 @@ def create_fragment(
     code = next_fragment_code(db)
     fragment = Fragment(
         fragment_code=code,
-        title="Untitled fragment",
+        title=title.strip() or "Untitled fragment",
         raw_transcript=text,
         audio_path="",
         audio_mime_type="",
@@ -114,6 +115,7 @@ def update_fragment(
     raw_transcript: str = Form(""),
     edited_version: str = Form(""),
     notes: str = Form(""),
+    action: str = Form("save"),
     db: Session = Depends(get_db),
 ):
     fragment = db.get(Fragment, fragment_id)
@@ -127,6 +129,11 @@ def update_fragment(
     fragment.edited_version = edited_version.strip()
     fragment.notes = notes.strip()
     db.commit()
+    if action == "export":
+        return RedirectResponse(
+            f"/fragments/{fragment_id}/export",
+            status_code=303,
+        )
     return RedirectResponse(f"/fragments/{fragment_id}?saved=1", status_code=303)
 
 

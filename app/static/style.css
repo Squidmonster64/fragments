@@ -5,3 +5,14 @@
 .recorder-card textarea{min-height:340px;resize:vertical;font-family:Georgia,serif;font-size:1.08rem}
 .recorder-card .save-button{width:100%;cursor:pointer}
 .hint{margin:16px 0 0;color:#6b7280;font-size:.9rem}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+.editor-actions .save-button,
+.editor-actions .secondary-button {
+  width: auto;
+}

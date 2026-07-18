@@ -4,7 +4,7 @@
 <section class="editor">
   <div class="editor-heading">
     <div><p class="eyebrow">{{ fragment.fragment_code }}</p><h1>{{ fragment.title }}</h1></div>
-    <a class="secondary-button" href="/fragments/{{ fragment.id }}/export">Export Markdown</a>
+    <a class="secondary-button" href="/">New Fragment</a>
   </div>
   {% if fragment.audio_path %}
   <audio controls preload="metadata" src="/audio/{{ fragment.id }}"></audio>
@@ -20,7 +20,15 @@
     <label>Original dictation<textarea name="raw_transcript" rows="10">{{ fragment.raw_transcript }}</textarea></label>
     <label>Edited version<textarea name="edited_version" rows="14">{{ fragment.edited_version }}</textarea></label>
     <label>Notes<textarea name="notes" rows="5">{{ fragment.notes }}</textarea></label>
-    <button class="save-button" type="submit">Save fragment</button>
+    <div class="editor-actions">
+      <button class="save-button" type="submit" name="action" value="save">
+        Save fragment
+      </button>
+      <button class="secondary-button" type="submit" name="action" value="export">
+        Save and Export Markdown
+      </button>
+      <a class="secondary-button" href="/">New Fragment</a>
+    </div>
   </form>
 </section>
 {% endblock %}

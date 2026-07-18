@@ -5,6 +5,12 @@
   <h1>Write a new fragment</h1>
 
   <form method="post" action="/api/fragments">
+    <label class="fragment-entry-label" for="fragmentTitle">Title</label>
+    <input
+      id="fragmentTitle"
+      name="title"
+      placeholder="Fragment title"
+      required>
     <label class="fragment-entry-label" for="fragmentText">Fragment text</label>
     <textarea
       id="fragmentText"

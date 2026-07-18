@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="recorder-card">
+  <p class="eyebrow">NEW FRAGMENT</p>
+  <h1>Press once. Speak. Press again.</h1>
+  <button id="recordButton" class="mic-button" aria-label="Start recording">●</button>
+  <p id="recordStatus">Ready</p>
+  <p id="liveTranscript" class="transcript-preview"></p>
+</section>
+<section class="library">
+  <h2>Fragments</h2>
+  {% if fragments %}
+    {% for f in fragments %}
+    <a class="fragment-row" href="/fragments/{{ f.id }}">
+      <strong>{{ f.fragment_code }}</strong>
+      <span>{{ f.title }}</span>
+      <small>{{ f.created_at.strftime('%d %b %Y') }}</small>
+    </a>
+    {% endfor %}
+  {% else %}<p>No fragments yet.</p>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/recorder.js"></script>{% endblock %}

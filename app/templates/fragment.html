@@ -4,31 +4,27 @@
 <section class="editor">
   <div class="editor-heading">
     <div><p class="eyebrow">{{ fragment.fragment_code }}</p><h1>{{ fragment.title }}</h1></div>
-    <a class="secondary-button" href="/">New Fragment</a>
+    <a class="secondary-button" href="/">Back to library</a>
   </div>
-  {% if fragment.audio_path %}
-  <audio controls preload="metadata" src="/audio/{{ fragment.id }}"></audio>
-  {% endif %}
-  {% if request.query_params.get('saved') %}<p class="saved">Saved.</p>{% endif %}
+  {% if request.query_params.get('saved') %}<p class="saved">Fragment saved.</p>{% endif %}
   <form method="post">
     <label>Title<input name="title" value="{{ fragment.title }}" required></label>
-    <div class="two-col">
-      <label>Status<input name="status" value="{{ fragment.status }}"></label>
-      <label>Themes<input name="themes" value="{{ fragment.themes }}" placeholder="Memory, travel, identity"></label>
-    </div>
-    <label>Cross references<input name="cross_references" value="{{ fragment.cross_references }}" placeholder="F001, F002"></label>
-    <label>Original dictation<textarea name="raw_transcript" rows="10">{{ fragment.raw_transcript }}</textarea></label>
-    <label>Edited version<textarea name="edited_version" rows="14">{{ fragment.edited_version }}</textarea></label>
+    <label>Status
+      <select name="status">
+        {% for status in statuses %}<option value="{{ status }}" {% if fragment.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}
+      </select>
+    </label>
+    <fieldset><legend>Themes</legend><div class="choice-grid">
+      {% for theme in themes %}<label class="choice"><input type="checkbox" name="themes" value="{{ theme }}" {% if theme in selected_themes %}checked{% endif %}><span>{{ theme }}</span></label>{% endfor %}
+    </div></fieldset>
+    <fieldset><legend>Cross references</legend>
+      {% if other_fragments %}<div class="choice-grid refs">{% for other in other_fragments %}<label class="choice"><input type="checkbox" name="cross_references" value="{{ other.fragment_code }}" {% if other.fragment_code in selected_refs %}checked{% endif %}><span><strong>{{ other.fragment_code }}</strong> {{ other.title }}</span></label>{% endfor %}</div>{% else %}<p class="field-note">No other fragments available.</p>{% endif %}
+    </fieldset>
+    <label>Original text<textarea name="raw_transcript" rows="10">{{ fragment.raw_transcript }}</textarea></label>
+    <label>Edited version<textarea name="edited_version" rows="14">{{ fragment.edited_version }}</textarea><small class="field-note">A working copy starts with the original text. Edit it here; the original remains separate.</small></label>
     <label>Notes<textarea name="notes" rows="5">{{ fragment.notes }}</textarea></label>
-    <div class="editor-actions">
-      <button class="save-button" type="submit" name="action" value="save">
-        Save fragment
-      </button>
-      <button class="secondary-button" type="submit" name="action" value="export">
-        Save and Export Markdown
-      </button>
-      <a class="secondary-button" href="/">New Fragment</a>
-    </div>
+    <div class="editor-actions"><button class="save-button" type="submit" name="action" value="save">Save fragment</button><button class="secondary-button" type="submit" name="action" value="export">Save and export</button><a class="secondary-button" href="/">New fragment</a></div>
   </form>
+  <form method="post" action="/fragments/{{ fragment.id }}/delete" onsubmit="return confirm('Delete {{ fragment.fragment_code }} permanently? This cannot be undone.');" class="danger-zone"><button class="danger-button" type="submit">Delete fragment</button></form>
 </section>
 {% endblock %}

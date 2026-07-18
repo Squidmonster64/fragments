@@ -1,45 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="recorder-card">
-  <p class="eyebrow">NEW FRAGMENT</p>
-  <h1>Write a new fragment</h1>
-
+  <p class="eyebrow">NEW FRAGMENT</p><h1>Write a new fragment</h1>
+  {% if request.query_params.get('deleted') %}<p class="saved">Fragment deleted.</p>{% endif %}
   <form method="post" action="/api/fragments">
-    <label class="fragment-entry-label" for="fragmentTitle">Title</label>
-    <input
-      id="fragmentTitle"
-      name="title"
-      placeholder="Fragment title"
-      required>
-    <label class="fragment-entry-label" for="fragmentText">Fragment text</label>
-    <textarea
-      id="fragmentText"
-      name="raw_transcript"
-      rows="16"
-      required
-      autofocus
-      placeholder="Type, paste, or use Apple Dictation…"></textarea>
-
-    <button class="save-button" type="submit">Save Fragment</button>
+    <label class="fragment-entry-label" for="fragmentTitle">Title</label><input id="fragmentTitle" name="title" placeholder="Fragment title" required>
+    <label class="fragment-entry-label" for="fragmentText">Fragment text</label><textarea id="fragmentText" name="raw_transcript" rows="16" required autofocus placeholder="Type, paste, or use Apple Dictation…"></textarea>
+    <button class="save-button" type="submit">Save fragment</button>
   </form>
-
-  <p class="hint">
-    Type normally, paste copied text, or use the microphone on the Apple keyboard.
-  </p>
+  <p class="hint">The original text is preserved and copied into a separate edited version for revision.</p>
 </section>
-
-<section class="library">
-  <h2>Fragments</h2>
-  {% if fragments %}
-    {% for f in fragments %}
-    <a class="fragment-row" href="/fragments/{{ f.id }}">
-      <strong>{{ f.fragment_code }}</strong>
-      <span>{{ f.title }}</span>
-      <small>{{ f.created_at.strftime('%d %b %Y') }}</small>
-    </a>
-    {% endfor %}
-  {% else %}
-    <p>No fragments yet.</p>
-  {% endif %}
-</section>
+<section class="library"><h2>Fragments</h2>{% if fragments %}{% for f in fragments %}<a class="fragment-row" href="/fragments/{{ f.id }}"><strong>{{ f.fragment_code }}</strong><span>{{ f.title }}</span><small>{{ f.status }} · {{ f.created_at.strftime('%d %b %Y') }}</small></a>{% endfor %}{% else %}<p>No fragments yet.</p>{% endif %}</section>
 {% endblock %}

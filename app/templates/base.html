@@ -3,14 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
-  <title>{% block title %}Fragments{% endblock %}</title>
+  <meta name="theme-color" content="#1d251f">
+  <title>{% block title %}Bloody Dave's Fragments{% endblock %}</title>
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar"><a href="/">Fragments</a><span>Originals preserved</span></header>
+  <header class="topbar">
+    <a class="suite-brand" href="/"><span>Bloody Dave's</span><strong>Fragments</strong></a>
+    <nav aria-label="Bloody Dave's Suite"><a href="https://bloody-recipes.pages.dev">Recipes</a><a class="current" href="/">Fragments</a><span>Thoughts worth keeping</span></nav>
+  </header>
   <main>{% block content %}{% endblock %}</main>
+  <footer class="suite-footer">Part of the independently run Bloody Dave's Suite.</footer>
   <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/static/service-worker.js');</script>
   {% block scripts %}{% endblock %}
 </body>

@@ -7,6 +7,8 @@
     <a class="secondary-button" href="/">Back to library</a>
   </div>
   {% if request.query_params.get('saved') %}<p class="saved">Fragment saved.</p>{% endif %}
+  {% if request.query_params.get('processing') %}<p class="saved">Processing state updated to {{ request.query_params.get('processing') }}.</p>{% endif %}
+  <section class="processing-panel"><p class="eyebrow">PROCESSING</p><h2>{{ fragment.processing_state|replace('_', ' ')|title }}</h2><p>Original text is always kept here. A handoff only creates a file for you to review in Structure; it does not share anything automatically.</p><div class="editor-actions"><form method="post" action="/fragments/{{ fragment.id }}/handoff"><button class="secondary-button" type="submit">Download Harvester handoff</button></form><form method="post" action="/fragments/{{ fragment.id }}/processing"><input type="hidden" name="processing_state" value="processed"><button class="secondary-button" type="submit">Mark processed</button></form><form method="post" action="/fragments/{{ fragment.id }}/processing"><input type="hidden" name="processing_state" value="unprocessed"><button class="secondary-button" type="submit">Return to unprocessed</button></form></div></section>
   <form method="post">
     <label>Title<input name="title" value="{{ fragment.title }}" required></label>
     <label>Status

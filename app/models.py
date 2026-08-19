@@ -17,5 +17,8 @@ class Fragment(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     audio_path: Mapped[str] = mapped_column(String(500))
     audio_mime_type: Mapped[str] = mapped_column(String(100), default="audio/webm")
+    processing_state: Mapped[str] = mapped_column(String(32), default="unprocessed")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_handoff_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

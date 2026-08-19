@@ -7,8 +7,29 @@
     <a class="secondary-button" href="/">Back to library</a>
   </div>
   {% if request.query_params.get('saved') %}<p class="saved">Fragment saved.</p>{% endif %}
+  {% if request.query_params.get('transcribed') %}<p class="saved">The finished recording was transcribed. Read the words below before deciding what they mean.</p>{% endif %}
+  {% if request.query_params.get('transcription') %}<p class="saved warning" id="transcription-result">The original recording is safe. Automatic transcription did not finish, so you can try again or type the words yourself.</p>{% endif %}
   {% if request.query_params.get('processing') %}<p class="saved">Processing state updated to {{ request.query_params.get('processing') }}.</p>{% endif %}
   <section class="processing-panel"><p class="eyebrow">PROCESSING</p><h2>{{ fragment.processing_state|replace('_', ' ')|title }}</h2><p>Original text is always kept here. A handoff only creates a file for you to review in Structure; it does not share anything automatically.</p><div class="editor-actions"><form method="post" action="/fragments/{{ fragment.id }}/handoff"><button class="secondary-button" type="submit">Download Harvester handoff</button></form><form method="post" action="/fragments/{{ fragment.id }}/processing"><input type="hidden" name="processing_state" value="processed"><button class="secondary-button" type="submit">Mark processed</button></form><form method="post" action="/fragments/{{ fragment.id }}/processing"><input type="hidden" name="processing_state" value="unprocessed"><button class="secondary-button" type="submit">Return to unprocessed</button></form></div></section>
+  {% if fragment.audio_path %}<section class="audio-panel"><p class="eyebrow">ORIGINAL RECORDING</p><h2>The recording stays with this Fragment</h2><audio controls preload="metadata" src="/audio/{{ fragment.id }}">Your browser cannot play this recording.</audio><p class="field-note">This is the original saved audio. Stopping the recorder ended the microphone session before transcription began.</p></section>{% endif %}
+  <section class="review-panel" id="fragment-review" data-fragment-id="{{ fragment.id }}">
+    <p class="eyebrow">WHAT WAS HEARD</p>
+    <h2>Original words</h2>
+    {% if fragment.raw_transcript %}<blockquote id="heard-words">{{ fragment.raw_transcript }}</blockquote>{% else %}<p id="heard-words">No words have been saved yet.</p>{% endif %}
+    <div class="editor-actions">
+      {% if fragment.audio_path %}<button class="secondary-button" id="transcribe-button" type="button">Transcribe recording</button>{% endif %}
+      <button class="save-button" id="interpret-button" type="button" {% if not fragment.raw_transcript %}disabled{% endif %}>Make a review draft</button>
+    </div>
+    <p class="field-note" id="review-status">Transcription gives you the words. A review draft only suggests where anything might belong; it never adds it anywhere.</p>
+  </section>
+  <section class="review-panel interpretation-panel" id="interpretation-panel" {% if not interpretation %}hidden{% endif %}>
+    <p class="eyebrow">WHAT IT MIGHT MEAN</p>
+    <h2>Review before anything moves</h2>
+    <p id="memory-reason">{% if interpretation %}Keep as <strong>{{ fragment.memory_class|title }}</strong>. {{ fragment.memory_class_reason }}{% else %}No interpretation has been made yet.{% endif %}</p>
+    <div id="clarification-box">{% if routing_review.get('clarifications') %}<p class="clarification-question">{{ routing_review.get('clarifications')[0] }}</p>{% endif %}</div>
+    <div id="routing-candidates" class="routing-candidates">{% for candidate in routing_review.get('candidates', []) %}<article class="route-card" data-candidate-id="{{ candidate.id }}"><p class="route-destination">{{ candidate.destination }}</p><h3>{{ candidate.title }}</h3><p>{{ candidate.detail }}</p><small>{{ (candidate.confidence * 100)|round|int }}% clear{% if candidate.requires_confirmation %} · needs your say-so{% endif %}</small><p class="route-state">{{ candidate.status|title }}</p><div class="editor-actions"><button class="secondary-button route-action" data-status="accepted" type="button">Keep suggestion</button><button class="secondary-button route-action" data-status="edited" type="button">Change</button><button class="secondary-button route-action" data-status="rejected" type="button">Not this</button></div><div class="route-editor" hidden><label>Short title<input value="{{ candidate.title }}"></label><label>Detail<textarea rows="3">{{ candidate.detail }}</textarea></label><button class="save-button route-save" type="button">Save change</button></div></article>{% endfor %}</div>
+    <p class="field-note">“Keep suggestion” only records your review choice here. It does not create a reminder, task, decision, or anything else.</p>
+  </section>
   <section class="processing-panel" id="live-sync" data-fragment-id="{{ fragment.id }}" data-fragment-code="{{ fragment.fragment_code }}"><p class="eyebrow">PRIVATE LIVE SYNC</p><h2>Keep this fragment current across the suite</h2><p id="sync-status">This Fragment remains in its private library until you choose to connect it.</p><label>Private passphrase<input id="sync-passphrase" type="password" autocomplete="current-password" placeholder="Only used to open this private session"></label><div class="editor-actions"><button class="secondary-button" id="sync-connect" type="button">Connect this Fragment</button><button class="secondary-button" id="sync-refresh" type="button">Refresh shared copy</button></div><small class="field-note">Once connected, the original, working revision, notes, and processing state are shared with Structure and chat. No external AI receives anything unless you separately authorise the MCP connection.</small></section>
   <form method="post" id="fragment-form">
     <label>Title<input name="title" value="{{ fragment.title }}" required></label>
@@ -16,6 +37,12 @@
       <select name="status">
         {% for status in statuses %}<option value="{{ status }}" {% if fragment.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}
       </select>
+    </label>
+    <label>Keep this as
+      <select name="memory_class">
+        {% for item in memory_classes %}<option value="{{ item }}" {% if fragment.memory_class == item %}selected{% endif %}>{{ item|title }}</option>{% endfor %}
+      </select>
+      <small class="field-note">Permanent stories and legacy material are never cleaned up automatically. If mixed, Permanent wins.</small>
     </label>
     <fieldset><legend>Themes</legend><div class="choice-grid">
       {% for theme in themes %}<label class="choice"><input type="checkbox" name="themes" value="{{ theme }}" {% if theme in selected_themes %}checked{% endif %}><span>{{ theme }}</span></label>{% endfor %}
@@ -41,6 +68,78 @@
       document.querySelector('#sync-refresh').onclick=async()=>{try{if(!localStorage.getItem(enabledKey))throw Error('Connect this Fragment first.');const found=await refresh();if(!found)status.textContent='No shared copy exists for this Fragment yet.';}catch(error){status.textContent=error.message||'Could not refresh private sync.'}};
       form.addEventListener('submit',async event=>{if(!localStorage.getItem(enabledKey)||event.submitter?.value==='export')return;event.preventDefault();try{const saved=await save();if(saved)form.submit();}catch(error){status.textContent=error.message||'Could not save private sync.'}});
       if(localStorage.getItem(enabledKey))status.textContent='Private sync is connected. Refresh shared copy if another surface changed it.';
+    })();
+  </script>
+  <script>
+    (() => {
+      const panel = document.querySelector('#fragment-review');
+      if (!panel) return;
+      const id = panel.dataset.fragmentId;
+      const status = document.querySelector('#review-status');
+      const heard = document.querySelector('#heard-words');
+      const interpretButton = document.querySelector('#interpret-button');
+      const transcribeButton = document.querySelector('#transcribe-button');
+      const failure = document.querySelector('#transcription-result');
+      if (failure) {
+        const detail = sessionStorage.getItem('bloody-daves:fragments:transcription-error');
+        if (detail) { failure.textContent = `The original recording is safe. ${detail.replace(/^\"|\"$/g, '')}`; sessionStorage.removeItem('bloody-daves:fragments:transcription-error'); }
+      }
+      async function jsonRequest(path, options = {}) {
+        const response = await fetch(path, options);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw Error(body.detail || body.message || 'That did not work. The original Fragment is still safe.');
+        return body;
+      }
+      if (transcribeButton) transcribeButton.addEventListener('click', async () => {
+        transcribeButton.disabled = true;
+        status.textContent = 'Transcribing the saved recording…';
+        try {
+          await jsonRequest(`/api/fragments/${id}/transcribe`, {method: 'POST'});
+          window.location.assign(`/fragments/${id}?transcribed=1`);
+        } catch (error) {
+          status.textContent = error.message;
+          transcribeButton.disabled = false;
+        }
+      });
+      if (interpretButton) interpretButton.addEventListener('click', async () => {
+        interpretButton.disabled = true;
+        status.textContent = 'Making a review draft…';
+        try {
+          await jsonRequest(`/api/fragments/${id}/interpret`, {method: 'POST'});
+          window.location.reload();
+        } catch (error) {
+          status.textContent = error.message;
+          interpretButton.disabled = false;
+        }
+      });
+      async function saveChoice(card, choice, overrides = {}) {
+        const candidateId = card.dataset.candidateId;
+        const payload = {candidate_id: candidateId, status: choice, ...overrides};
+        const result = await jsonRequest(`/api/fragments/${id}/routing-review`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+        const saved = result.routing_review.candidates.find(item => item.id === candidateId);
+        card.querySelector('.route-state').textContent = saved ? saved.status[0].toUpperCase() + saved.status.slice(1) : choice;
+        if (saved) {
+          card.querySelector('h3').textContent = saved.title;
+          card.querySelector('h3 + p').textContent = saved.detail;
+        }
+        card.querySelector('.route-editor').hidden = true;
+        status.textContent = 'Review saved. Nothing has been added to another app.';
+      }
+      document.querySelector('#routing-candidates')?.addEventListener('click', async event => {
+        const action = event.target.closest('.route-action');
+        const save = event.target.closest('.route-save');
+        const card = event.target.closest('.route-card');
+        if (!card) return;
+        if (action) {
+          const choice = action.dataset.status;
+          if (choice === 'edited') { card.querySelector('.route-editor').hidden = false; return; }
+          try { await saveChoice(card, choice); } catch (error) { status.textContent = error.message; }
+        }
+        if (save) {
+          const editor = card.querySelector('.route-editor');
+          try { await saveChoice(card, 'edited', {title: editor.querySelector('input').value, detail: editor.querySelector('textarea').value}); } catch (error) { status.textContent = error.message; }
+        }
+      });
     })();
   </script>
   <form method="post" action="/fragments/{{ fragment.id }}/delete" onsubmit="return confirm('Delete {{ fragment.fragment_code }} permanently? This cannot be undone.');" class="danger-zone"><button class="danger-button" type="submit">Delete fragment</button></form>

@@ -1,21 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
 <main class="workspace">
-  <section class="recorder-card">
-    <div class="editor-heading"><div><p class="eyebrow">NEW FRAGMENT</p><h1>Write a new fragment</h1></div><p class="hint">The original text is preserved and copied into a separate edited version for revision.</p></div>
+  <section class="recorder-card voice-card" aria-labelledby="capture-title">
+    <p class="eyebrow">NEW FRAGMENT</p>
+    <h1 id="capture-title">Say what you mean.</h1>
+    <p class="voice-intro">Your recording is saved first. After you stop, the words are transcribed. What was heard and what it might mean always stay separate.</p>
     {% if request.query_params.get('deleted') %}<p class="saved">Fragment deleted.</p>{% endif %}
     {% if request.query_params.get('imported') %}<p class="saved">{{ request.query_params.get('imported') }} imported fragment(s) were added as new editable records. Existing writing was not replaced.</p>{% endif %}
-    <form method="post" action="/api/fragments">
-      <label class="fragment-entry-label" for="fragmentTitle">Title</label><input id="fragmentTitle" name="title" placeholder="Fragment title" required>
-      <label class="fragment-entry-label" for="fragmentText">Fragment text</label><textarea id="fragmentText" name="raw_transcript" rows="16" required autofocus placeholder="Type, paste, or use Apple Dictation…"></textarea>
-      <button class="save-button" type="submit">Save fragment</button>
-    </form>
+    <div class="voice-capture" aria-live="polite">
+      <button id="recordButton" class="record-button" type="button" aria-label="Start recording"><span aria-hidden="true">●</span><span class="record-button-label">Start</span></button>
+      <p id="recordStatus" class="record-status">Tap once to record.</p>
+      <p id="liveTranscript" class="live-preview" hidden></p>
+      <p class="field-note">Tap the red button to start. It becomes a black Stop button. Stop ends the recording immediately; the saved recording is then transcribed. The live preview, when available, is never treated as the saved transcript.</p>
+    </div>
+    <details class="typed-capture">
+      <summary>Or type a fragment</summary>
+      <form method="post" action="/api/fragments">
+        <label class="fragment-entry-label" for="fragmentTitle">Title</label><input id="fragmentTitle" name="title" placeholder="A short title, if you want one">
+        <label class="fragment-entry-label" for="fragmentText">Your words</label><textarea id="fragmentText" name="raw_transcript" rows="10" required placeholder="Type, paste, or use Apple Dictation…"></textarea>
+        <button class="save-button" type="submit">Save words</button>
+      </form>
+    </details>
   </section>
   <section class="library" aria-labelledby="library-title">
     <div class="library-heading"><div><p class="eyebrow">RETRIEVE & REVIEW</p><h2 id="library-title">Fragments</h2></div><div class="backup-links"><a class="secondary-button" href="/export/backup">Export JSON</a><a class="secondary-button" href="/export/markdown">Export Markdown</a></div></div>
-    <form class="search-bar" method="get" action="/"><label class="sr-only" for="fragment-search">Search fragments</label><input id="fragment-search" name="q" value="{{ query }}" placeholder="Search titles, originals, revisions, notes or themes"><label class="review-toggle"><input type="checkbox" name="review" value="true" {% if review %}checked{% endif %}> Needs review</label><button class="secondary-button" type="submit">Search</button><a class="secondary-button" href="/">Clear</a></form>
+    <form class="search-bar" method="get" action="/"><label class="sr-only" for="fragment-search">Search fragments</label><input id="fragment-search" name="q" value="{{ query }}" placeholder="Search titles, original words, revisions, notes or themes"><label class="review-toggle"><input type="checkbox" name="review" value="true" {% if review %}checked{% endif %}> Needs review</label><label class="memory-filter" for="memory-filter">Keep as<select id="memory-filter" name="memory"><option value="">All</option>{% for item in memory_classes %}<option value="{{ item }}" {% if memory == item %}selected{% endif %}>{{ item|title }}</option>{% endfor %}</select></label><button class="secondary-button" type="submit">Search</button><a class="secondary-button" href="/">Clear</a></form>
     <form class="import-backup" method="post" action="/import/backup" enctype="multipart/form-data" onsubmit="return confirm('Imported entries will be added as new fragments. Existing writing will not be replaced. Continue?');"><label for="backup-file">Restore a JSON backup</label><input id="backup-file" name="backup" type="file" accept="application/json,.json" required><button class="secondary-button" type="submit">Import as new records</button></form>
-    {% if fragments %}<div class="fragment-list">{% for f in fragments %}<a class="fragment-row" href="/fragments/{{ f.id }}"><strong>{{ f.fragment_code }}</strong><span>{{ f.title }}</span><small>{{ f.processing_state|replace('_', ' ')|title }} · {{ f.status }} · updated {{ f.updated_at.strftime('%d %b %Y') }}{% if f.themes %} · {{ f.themes }}{% endif %}</small></a>{% endfor %}</div>{% else %}<p>{% if query or review %}No fragments match this view.{% else %}No fragments yet.{% endif %}</p>{% endif %}
+    {% if fragments %}<div class="fragment-list">{% for f in fragments %}<a class="fragment-row" href="/fragments/{{ f.id }}"><strong>{{ f.fragment_code }}</strong><span>{{ f.title }}</span><small><span class="memory-badge memory-{{ f.memory_class }}">{{ f.memory_class|title }}</span> {{ f.processing_state|replace('_', ' ')|title }} · {{ f.status }} · updated {{ f.updated_at.strftime('%d %b %Y') }}{% if f.themes %} · {{ f.themes }}{% endif %}</small></a>{% endfor %}</div>{% else %}<p>{% if query or review or memory %}No fragments match this view.{% else %}No fragments yet.{% endif %}</p>{% endif %}
   </section>
 </main>
 {% endblock %}
+{% block scripts %}<script src="/static/recorder.js" defer></script>{% endblock %}

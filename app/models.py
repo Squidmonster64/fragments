@@ -15,8 +15,20 @@ class Fragment(Base):
     raw_transcript: Mapped[str] = mapped_column(Text, default="")
     edited_version: Mapped[str] = mapped_column(Text, default="")
     notes: Mapped[str] = mapped_column(Text, default="")
-    audio_path: Mapped[str] = mapped_column(String(500))
+    # What was heard or written stays separate from every later interpretation.
+    audio_path: Mapped[str] = mapped_column(String(500), default="")
     audio_mime_type: Mapped[str] = mapped_column(String(100), default="audio/webm")
+
+    # These fields describe preservation and review only. They never create work
+    # in another surface by themselves.
+    memory_class: Mapped[str] = mapped_column(String(24), default="unclassified")
+    memory_class_reason: Mapped[str] = mapped_column(String(500), default="")
+    interpretation_json: Mapped[str] = mapped_column(Text, default="")
+    routing_review_json: Mapped[str] = mapped_column(Text, default="")
+    interpreted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    transcription_provider: Mapped[str] = mapped_column(String(80), default="")
+    transcription_model: Mapped[str] = mapped_column(String(120), default="")
+    transcribed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     processing_state: Mapped[str] = mapped_column(String(32), default="unprocessed")
     processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_handoff_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

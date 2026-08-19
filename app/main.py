@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from .context_hints import private_context_hint
 from .harvester_actions import apply_clear_actions, undo_action
+from .harvester_rules import learn_explicit_rules, revoke_learned_rule
 from .database import Base, SessionLocal, engine
 from .interpretation import interpret_fragment, valid_memory_class
 from .models import Fragment
@@ -403,6 +404,13 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
     else:
         fragment.memory_class = classified_as
         fragment.memory_class_reason = draft["memory_class_reason"]
+    learning = {"rules": [], "clarification": None}
+    # Meaningful story and legacy material never becomes a rule merely because
+    # it quotes instruction-like language.
+    if fragment.memory_class != "permanent":
+        learning = learn_explicit_rules(fragment.fragment_code, original_text)
+    if learning.get("clarification") and not draft["clarifications"]:
+        draft["clarifications"] = [str(learning["clarification"])]
     outcomes = apply_clear_actions(fragment.fragment_code, draft["candidates"])
     outcome_by_candidate = {str(outcome.get("candidate_id")): outcome for outcome in outcomes}
     for candidate in draft["candidates"]:
@@ -417,8 +425,9 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
         "candidates": draft["candidates"],
         "clarifications": draft["clarifications"],
         "immediate_actions": outcomes,
+        "learned_rules": learning.get("rules", []),
         "state": "review",
-        "no_changes_made": not bool(outcomes),
+        "no_changes_made": not bool(outcomes) and not bool(learning.get("rules")),
         "updated_at": utc_now().isoformat(),
     }
     fragment.interpretation_json = json.dumps(draft)
@@ -468,6 +477,24 @@ def undo_immediate_fragment_action(fragment_id: int, action_id: str, db: Session
     refresh_retention(fragment)
     db.commit()
     return {"routing_review": review, "message": "Harvester action undone."}
+
+
+@app.post("/api/fragments/{fragment_id}/learned-rules/{rule_id}/revoke")
+def revoke_fragment_rule(fragment_id: int, rule_id: str, db: Session = Depends(get_db)):
+    fragment = db.get(Fragment, fragment_id)
+    if not fragment:
+        raise HTTPException(404, "Fragment not found")
+    if not revoke_learned_rule(rule_id):
+        raise HTTPException(409, "That rule could not be turned off. It may already be off or the private service is unavailable.")
+    review = review_for(fragment)
+    for rule in review.get("learned_rules", []):
+        if isinstance(rule, dict) and rule.get("id") == rule_id:
+            rule["active"] = False
+            rule["revoked_at"] = utc_now().isoformat()
+    review["updated_at"] = utc_now().isoformat()
+    fragment.routing_review_json = json.dumps(review)
+    db.commit()
+    return {"routing_review": review, "message": "Harvester rule turned off."}
 
 
 @app.post("/api/fragments/{fragment_id}/routing-review")

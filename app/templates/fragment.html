@@ -29,6 +29,7 @@
     <div id="clarification-box">{% if routing_review.get('clarifications') %}<p class="clarification-question">{{ routing_review.get('clarifications')[0] }}</p>{% endif %}</div>
     <div id="routing-candidates" class="routing-candidates">{% for candidate in routing_review.get('candidates', []) %}<article class="route-card" data-candidate-id="{{ candidate.id }}"><p class="route-destination">{{ candidate.destination }}</p><h3>{{ candidate.title }}</h3><p>{{ candidate.detail }}</p><small>{{ (candidate.confidence * 100)|round|int }}% clear{% if candidate.requires_confirmation %} · needs your say-so{% endif %}</small><p class="route-state">{{ candidate.status|replace('_', ' ')|title }}</p>{% if candidate.status == 'acted' and candidate.get('action', {}).get('action_id') %}<p class="saved">{{ candidate.get('action', {}).get('message', 'Added.') }}</p><div class="editor-actions"><button class="secondary-button immediate-undo" data-action-id="{{ candidate.get('action', {}).get('action_id') }}" type="button">Undo this</button></div>{% else %}<div class="editor-actions"><button class="secondary-button route-action" data-status="accepted" type="button">Keep suggestion</button><button class="secondary-button route-action" data-status="edited" type="button">Change</button><button class="secondary-button route-action" data-status="rejected" type="button">Not this</button></div><div class="route-editor" hidden><label>Short title<input value="{{ candidate.title }}"></label><label>Detail<textarea rows="3">{{ candidate.detail }}</textarea></label><button class="save-button route-save" type="button">Save change</button></div>{% endif %}</article>{% endfor %}</div>
     <p class="field-note">Clear shopping and clear Run & Maintain jobs can be added straight away, with a source link and undo. Anything unclear or consequential stays here for you to decide.</p>
+    {% if routing_review.get('learned_rules') %}<section class="learned-rules" id="learned-rules"><p class="eyebrow">LEARNED FROM YOUR WORDS</p>{% for rule in routing_review.get('learned_rules', []) %}<article class="learned-rule" data-rule-id="{{ rule.id }}"><div><strong>{{ rule.source.text }}</strong><small>{{ rule.scope|title }} rule · {{ rule.when.matchTerms|join(', ') }} → {{ rule.routeTo|replace('_', ' ')|title }}{% if not rule.active %} · turned off{% endif %}</small></div>{% if rule.active %}<button class="secondary-button learned-rule-revoke" type="button">Turn off rule</button>{% endif %}</article>{% endfor %}</section>{% endif %}
   </section>
   <section class="retention-panel" id="retention-panel" data-fragment-id="{{ fragment.id }}">
     <p class="eyebrow">KEEP OR CLEAN UP</p>
@@ -153,6 +154,15 @@
         if (!undo) return;
         try {
           await jsonRequest(`/api/fragments/${id}/immediate-actions/${encodeURIComponent(undo.dataset.actionId)}/undo`, {method: 'POST'});
+          window.location.reload();
+        } catch (error) { status.textContent = error.message; }
+      });
+      document.querySelector('#learned-rules')?.addEventListener('click', async event => {
+        const revoke = event.target.closest('.learned-rule-revoke');
+        const card = event.target.closest('.learned-rule');
+        if (!revoke || !card) return;
+        try {
+          await jsonRequest(`/api/fragments/${id}/learned-rules/${encodeURIComponent(card.dataset.ruleId)}/revoke`, {method: 'POST'});
           window.location.reload();
         } catch (error) { status.textContent = error.message; }
       });

@@ -244,7 +244,9 @@ def home(request: Request, q: str = "", review: bool = False, memory: str = "", 
     if selected_memory in MEMORY_CLASSES:
         query = query.where(Fragment.memory_class == selected_memory)
     fragments = db.scalars(query.order_by(Fragment.updated_at.desc())).all()
-    return templates.TemplateResponse("index.html", {"request": request, "fragments": fragments, "query": text, "review": review, "memory": selected_memory, "memory_classes": MEMORY_CLASSES})
+    transient_records = db.scalars(select(Fragment).where(Fragment.memory_class == "transient")).all()
+    eligible_cleanup_count = sum(1 for fragment in transient_records if retention_status(fragment.memory_class, action_links_for(fragment))["eligible"])
+    return templates.TemplateResponse("index.html", {"request": request, "fragments": fragments, "query": text, "review": review, "memory": selected_memory, "memory_classes": MEMORY_CLASSES, "eligible_cleanup_count": eligible_cleanup_count})
 
 
 @app.post("/api/fragments")
@@ -602,6 +604,22 @@ def set_processing_state(fragment_id: int, processing_state: str = Form(...), db
     fragment.processed_at = datetime.utcnow() if processing_state == "processed" else None
     db.commit()
     return RedirectResponse(f"/fragments/{fragment.id}?processing={processing_state}", status_code=303)
+
+
+@app.post("/api/fragments/cleanup-eligible")
+def cleanup_eligible_transients(db: Session = Depends(get_db)):
+    records = db.scalars(select(Fragment).where(Fragment.memory_class == "transient")).all()
+    eligible = [fragment for fragment in records if retention_status(fragment.memory_class, action_links_for(fragment))["eligible"]]
+    removed_codes: list[str] = []
+    for fragment in eligible:
+        if fragment.audio_path:
+            audio_path = AUDIO_DIR / fragment.audio_path
+            if audio_path.exists():
+                audio_path.unlink()
+        removed_codes.append(fragment.fragment_code)
+        db.delete(fragment)
+    db.commit()
+    return {"removed": removed_codes, "message": f"Removed {len(removed_codes)} eligible transient Fragment{'s' if len(removed_codes) != 1 else ''}."}
 
 
 @app.post("/fragments/{fragment_id}/delete")

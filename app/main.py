@@ -14,9 +14,11 @@ from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.orm import Session
 
 from .context_hints import private_context_hint
+from .harvester_actions import apply_clear_actions, undo_action
 from .database import Base, SessionLocal, engine
 from .interpretation import interpret_fragment, valid_memory_class
 from .models import Fragment
+from .retention import normalise_link, retention_status
 from .transcription import TranscriptionConfigurationError, TranscriptionProviderError, transcribe_finished_recording
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,6 +43,9 @@ def ensure_fragment_columns() -> None:
         # begin with empty review data and are normalised by json_object().
         "interpretation_json": "TEXT",
         "routing_review_json": "TEXT",
+        "linked_actions_json": "TEXT",
+        "cleanup_eligible_at": "DATETIME",
+        "cleanup_state": "VARCHAR(32) NOT NULL DEFAULT 'kept'",
         "interpreted_at": "DATETIME",
         "transcription_provider": "VARCHAR(80) NOT NULL DEFAULT ''",
         "transcription_model": "VARCHAR(120) NOT NULL DEFAULT ''",
@@ -94,6 +99,29 @@ def interpretation_for(fragment: Fragment) -> dict:
 
 def review_for(fragment: Fragment) -> dict:
     return json_object(fragment.routing_review_json)
+
+
+def json_array(value: str) -> list:
+    try:
+        parsed = json.loads(value) if value else []
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def action_links_for(fragment: Fragment) -> list[dict]:
+    return [item for item in json_array(fragment.linked_actions_json) if isinstance(item, dict)]
+
+
+def refresh_retention(fragment: Fragment) -> dict:
+    status = retention_status(fragment.memory_class, action_links_for(fragment))
+    fragment.cleanup_state = "eligible" if status["eligible"] else "kept"
+    eligible_at = status.get("eligible_at")
+    try:
+        fragment.cleanup_eligible_at = datetime.fromisoformat(str(eligible_at).replace("Z", "+00:00")) if eligible_at else None
+    except ValueError:
+        fragment.cleanup_eligible_at = None
+    return status
 
 
 def audio_extension(mime_type: str, filename: str) -> str:
@@ -183,6 +211,10 @@ def fragment_payload(fragment: Fragment) -> dict:
         "memory_class_reason": fragment.memory_class_reason,
         "interpretation": interpretation_for(fragment),
         "routing_review": review_for(fragment),
+        "linked_actions": action_links_for(fragment),
+        "cleanup_eligible_at": fragment.cleanup_eligible_at.isoformat() if fragment.cleanup_eligible_at else "",
+        "cleanup_state": fragment.cleanup_state,
+        "retention": refresh_retention(fragment),
         "interpreted_at": fragment.interpreted_at.isoformat() if fragment.interpreted_at else "",
         "transcription_provider": fragment.transcription_provider,
         "transcription_model": fragment.transcription_model,
@@ -265,6 +297,8 @@ def fragment_page(fragment_id: int, request: Request, db: Session = Depends(get_
             "other_fragments": other_fragments,
             "interpretation": interpretation_for(fragment),
             "routing_review": review_for(fragment),
+            "action_links": action_links_for(fragment),
+            "retention": retention_status(fragment.memory_class, action_links_for(fragment)),
         },
     )
 
@@ -307,6 +341,7 @@ def update_fragment(
     elif valid_memory_class(memory_class):
         fragment.memory_class = memory_class
         fragment.memory_class_reason = "Set by you."
+    refresh_retention(fragment)
     db.commit()
     if action == "export":
         return RedirectResponse(f"/fragments/{fragment_id}/export", status_code=303)
@@ -340,6 +375,7 @@ def transcribe_fragment(fragment_id: int, db: Session = Depends(get_db)):
     fragment.interpreted_at = None
     fragment.memory_class = "unclassified"
     fragment.memory_class_reason = "The recording has been transcribed. Review what was heard before deciding what it means."
+    refresh_retention(fragment)
     db.commit()
     return {
         "fragment": fragment_payload(fragment),
@@ -365,27 +401,71 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
     else:
         fragment.memory_class = classified_as
         fragment.memory_class_reason = draft["memory_class_reason"]
+    outcomes = apply_clear_actions(fragment.fragment_code, draft["candidates"])
+    outcome_by_candidate = {str(outcome.get("candidate_id")): outcome for outcome in outcomes}
+    for candidate in draft["candidates"]:
+        outcome = outcome_by_candidate.get(str(candidate.get("id")))
+        if outcome and outcome.get("status") == "acted":
+            candidate["status"] = "acted"
+            candidate["action"] = outcome
     review = {
-        "schema": "bloody-daves/fragment-routing-review/v1",
+        "schema": "bloody-daves/fragment-routing-review/v2",
         "fragment_id": fragment.id,
         "source_fragment_code": fragment.fragment_code,
         "candidates": draft["candidates"],
         "clarifications": draft["clarifications"],
+        "immediate_actions": outcomes,
         "state": "review",
-        "no_changes_made": True,
+        "no_changes_made": not bool(outcomes),
         "updated_at": utc_now().isoformat(),
     }
     fragment.interpretation_json = json.dumps(draft)
     fragment.routing_review_json = json.dumps(review)
     fragment.interpreted_at = utc_now()
     fragment.processing_state = "ready_for_review"
+    # Record source links for any immediate action. The remote action has its
+    # own idempotency and undo ledger; Fragments only stores the relationship.
+    links = action_links_for(fragment)
+    for outcome in outcomes:
+        if outcome.get("status") != "acted" or not outcome.get("target_id"):
+            continue
+        link = normalise_link({
+            "target_app": outcome.get("target_app", "Structure"), "target_type": outcome.get("target_type", "item"),
+            "target_id": outcome["target_id"], "label": outcome.get("message", "Harvester action"), "state": "open",
+        })
+        if link and not any((item.get("target_app"), item.get("target_type"), item.get("target_id")) == (link["target_app"], link["target_type"], link["target_id"]) for item in links):
+            links.append(link)
+    fragment.linked_actions_json = json.dumps(links)
+    refresh_retention(fragment)
     db.commit()
     return {
         "fragment": fragment_payload(fragment),
         "interpretation": draft,
         "routing_review": review,
-        "message": "These are suggestions only. Nothing has been added anywhere yet.",
+        "message": "Clear items were added where they belong. Everything else is here for you to review.",
     }
+
+
+@app.post("/api/fragments/{fragment_id}/immediate-actions/{action_id}/undo")
+def undo_immediate_fragment_action(fragment_id: int, action_id: str, db: Session = Depends(get_db)):
+    fragment = db.get(Fragment, fragment_id)
+    if not fragment:
+        raise HTTPException(404, "Fragment not found")
+    action = undo_action(action_id)
+    if not action:
+        raise HTTPException(409, "That Harvester action could not be undone. It may already have changed or the private service is unavailable.")
+    review = review_for(fragment)
+    for candidate in review.get("candidates", []):
+        if isinstance(candidate, dict) and isinstance(candidate.get("action"), dict) and candidate["action"].get("action_id") == action_id:
+            candidate["status"] = "undone"
+            candidate["action"]["message"] = "Harvester action undone."
+    links = [link for link in action_links_for(fragment) if str(link.get("target_id")) != str(action.get("targetId"))]
+    fragment.linked_actions_json = json.dumps(links)
+    review["updated_at"] = utc_now().isoformat()
+    fragment.routing_review_json = json.dumps(review)
+    refresh_retention(fragment)
+    db.commit()
+    return {"routing_review": review, "message": "Harvester action undone."}
 
 
 @app.post("/api/fragments/{fragment_id}/routing-review")
@@ -422,6 +502,74 @@ async def update_routing_review(fragment_id: int, request: Request, db: Session 
     fragment.routing_review_json = json.dumps(review)
     db.commit()
     return {"routing_review": review, "message": "Review saved. Nothing has been added to another app."}
+
+
+@app.get("/api/fragments/{fragment_id}/retention")
+def fragment_retention(fragment_id: int, db: Session = Depends(get_db)):
+    fragment = db.get(Fragment, fragment_id)
+    if not fragment:
+        raise HTTPException(404, "Fragment not found")
+    return {"memory_class": fragment.memory_class, "links": action_links_for(fragment), "retention": retention_status(fragment.memory_class, action_links_for(fragment))}
+
+
+@app.post("/api/fragments/{fragment_id}/action-links")
+async def record_action_link(fragment_id: int, request: Request, db: Session = Depends(get_db)):
+    fragment = db.get(Fragment, fragment_id)
+    if not fragment:
+        raise HTTPException(404, "Fragment not found")
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as error:
+        raise HTTPException(400, "The linked action could not be read.") from error
+    link = normalise_link(body.get("link"))
+    if not link:
+        raise HTTPException(400, "A linked action needs an app, type, ID, label, and explicit open or completed state.")
+    links = action_links_for(fragment)
+    identity = (link["target_app"], link["target_type"], link["target_id"])
+    replaced = False
+    for index, existing in enumerate(links):
+        if (existing.get("target_app"), existing.get("target_type"), existing.get("target_id")) == identity:
+            links[index] = link
+            replaced = True
+            break
+    if not replaced:
+        links.append(link)
+    fragment.linked_actions_json = json.dumps(links)
+    status = refresh_retention(fragment)
+    db.commit()
+    return {"links": links, "retention": status, "message": "The link was recorded. No work in another app was changed."}
+
+
+@app.post("/api/fragments/{fragment_id}/action-links/{target_id}/complete")
+def complete_action_link(fragment_id: int, target_id: str, db: Session = Depends(get_db)):
+    fragment = db.get(Fragment, fragment_id)
+    if not fragment:
+        raise HTTPException(404, "Fragment not found")
+    links = action_links_for(fragment)
+    matching = [link for link in links if str(link.get("target_id")) == target_id]
+    if len(matching) != 1:
+        raise HTTPException(404, "A single linked action with that ID was not found.")
+    matching[0]["state"] = "completed"
+    matching[0]["completed_at"] = utc_now().isoformat()
+    fragment.linked_actions_json = json.dumps(links)
+    status = refresh_retention(fragment)
+    db.commit()
+    return {"links": links, "retention": status, "message": "The source link is marked complete here. The linked action itself was not changed."}
+
+
+@app.delete("/api/fragments/{fragment_id}/action-links/{target_id}")
+def remove_action_link(fragment_id: int, target_id: str, db: Session = Depends(get_db)):
+    fragment = db.get(Fragment, fragment_id)
+    if not fragment:
+        raise HTTPException(404, "Fragment not found")
+    links = action_links_for(fragment)
+    retained = [link for link in links if str(link.get("target_id")) != target_id]
+    if len(retained) == len(links):
+        raise HTTPException(404, "A linked action with that ID was not found.")
+    fragment.linked_actions_json = json.dumps(retained)
+    status = refresh_retention(fragment)
+    db.commit()
+    return {"links": retained, "retention": status, "message": "The source link was removed. The linked action itself was not changed."}
 
 
 @app.post("/fragments/{fragment_id}/handoff")

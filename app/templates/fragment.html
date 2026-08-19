@@ -27,8 +27,16 @@
     <h2>Review before anything moves</h2>
     <p id="memory-reason">{% if interpretation %}Keep as <strong>{{ fragment.memory_class|title }}</strong>. {{ fragment.memory_class_reason }}{% else %}No interpretation has been made yet.{% endif %}</p>
     <div id="clarification-box">{% if routing_review.get('clarifications') %}<p class="clarification-question">{{ routing_review.get('clarifications')[0] }}</p>{% endif %}</div>
-    <div id="routing-candidates" class="routing-candidates">{% for candidate in routing_review.get('candidates', []) %}<article class="route-card" data-candidate-id="{{ candidate.id }}"><p class="route-destination">{{ candidate.destination }}</p><h3>{{ candidate.title }}</h3><p>{{ candidate.detail }}</p><small>{{ (candidate.confidence * 100)|round|int }}% clear{% if candidate.requires_confirmation %} · needs your say-so{% endif %}</small><p class="route-state">{{ candidate.status|title }}</p><div class="editor-actions"><button class="secondary-button route-action" data-status="accepted" type="button">Keep suggestion</button><button class="secondary-button route-action" data-status="edited" type="button">Change</button><button class="secondary-button route-action" data-status="rejected" type="button">Not this</button></div><div class="route-editor" hidden><label>Short title<input value="{{ candidate.title }}"></label><label>Detail<textarea rows="3">{{ candidate.detail }}</textarea></label><button class="save-button route-save" type="button">Save change</button></div></article>{% endfor %}</div>
-    <p class="field-note">“Keep suggestion” only records your review choice here. It does not create a reminder, task, decision, or anything else.</p>
+    <div id="routing-candidates" class="routing-candidates">{% for candidate in routing_review.get('candidates', []) %}<article class="route-card" data-candidate-id="{{ candidate.id }}"><p class="route-destination">{{ candidate.destination }}</p><h3>{{ candidate.title }}</h3><p>{{ candidate.detail }}</p><small>{{ (candidate.confidence * 100)|round|int }}% clear{% if candidate.requires_confirmation %} · needs your say-so{% endif %}</small><p class="route-state">{{ candidate.status|replace('_', ' ')|title }}</p>{% if candidate.status == 'acted' and candidate.get('action', {}).get('action_id') %}<p class="saved">{{ candidate.get('action', {}).get('message', 'Added.') }}</p><div class="editor-actions"><button class="secondary-button immediate-undo" data-action-id="{{ candidate.get('action', {}).get('action_id') }}" type="button">Undo this</button></div>{% else %}<div class="editor-actions"><button class="secondary-button route-action" data-status="accepted" type="button">Keep suggestion</button><button class="secondary-button route-action" data-status="edited" type="button">Change</button><button class="secondary-button route-action" data-status="rejected" type="button">Not this</button></div><div class="route-editor" hidden><label>Short title<input value="{{ candidate.title }}"></label><label>Detail<textarea rows="3">{{ candidate.detail }}</textarea></label><button class="save-button route-save" type="button">Save change</button></div>{% endif %}</article>{% endfor %}</div>
+    <p class="field-note">Clear shopping and clear Run & Maintain jobs can be added straight away, with a source link and undo. Anything unclear or consequential stays here for you to decide.</p>
+  </section>
+  <section class="retention-panel" id="retention-panel" data-fragment-id="{{ fragment.id }}">
+    <p class="eyebrow">KEEP OR CLEAN UP</p>
+    <h2>{{ fragment.memory_class|title }}</h2>
+    <p id="retention-reason">{{ retention.reason }}</p>
+    <p class="field-note">A Transient Fragment is only eligible after every recorded linked action is completed and a further 30 days have passed. Permanent and Reference material stays put.</p>
+    <div id="action-links" class="action-links">{% if action_links %}{% for link in action_links %}<article class="action-link" data-target-id="{{ link.target_id }}"><div><strong>{{ link.label }}</strong><small>{{ link.target_app }} · {{ link.target_type }} · {{ link.state|title }}{% if link.completed_at %} · completed {{ link.completed_at[:10] }}{% endif %}</small></div><div class="editor-actions">{% if link.state != 'completed' %}<button class="secondary-button action-link-complete" type="button">Mark source link complete</button>{% endif %}<button class="secondary-button action-link-remove" type="button">Remove link</button></div></article>{% endfor %}{% else %}<p class="field-note">No completed work is linked to this Fragment yet, so it will be kept.</p>{% endif %}</div>
+    <details class="link-action-details"><summary>Record an existing action link</summary><form id="action-link-form"><label>App<input name="target_app" placeholder="For example: Run & Maintain" required></label><label>Kind<input name="target_type" placeholder="For example: maintenance item" required></label><label>Existing item ID<input name="target_id" placeholder="The item’s existing ID" required></label><label>What it is<input name="label" placeholder="For example: Renew boat insurance" required></label><label>State<select name="state"><option value="open">Open</option><option value="completed">Completed</option></select></label><button class="save-button" type="submit">Record link</button></form></details>
   </section>
   <section class="processing-panel" id="live-sync" data-fragment-id="{{ fragment.id }}" data-fragment-code="{{ fragment.fragment_code }}"><p class="eyebrow">PRIVATE LIVE SYNC</p><h2>Keep this fragment current across the suite</h2><p id="sync-status">This Fragment remains in its private library until you choose to connect it.</p><label>Private passphrase<input id="sync-passphrase" type="password" autocomplete="current-password" placeholder="Only used to open this private session"></label><div class="editor-actions"><button class="secondary-button" id="sync-connect" type="button">Connect this Fragment</button><button class="secondary-button" id="sync-refresh" type="button">Refresh shared copy</button></div><small class="field-note">Once connected, the original, working revision, notes, and processing state are shared with Structure and chat. No external AI receives anything unless you separately authorise the MCP connection.</small></section>
   <form method="post" id="fragment-form">
@@ -139,6 +147,37 @@
           const editor = card.querySelector('.route-editor');
           try { await saveChoice(card, 'edited', {title: editor.querySelector('input').value, detail: editor.querySelector('textarea').value}); } catch (error) { status.textContent = error.message; }
         }
+      });
+      document.querySelector('#routing-candidates')?.addEventListener('click', async event => {
+        const undo = event.target.closest('.immediate-undo');
+        if (!undo) return;
+        try {
+          await jsonRequest(`/api/fragments/${id}/immediate-actions/${encodeURIComponent(undo.dataset.actionId)}/undo`, {method: 'POST'});
+          window.location.reload();
+        } catch (error) { status.textContent = error.message; }
+      });
+      const retentionPanel = document.querySelector('#retention-panel');
+      const linkForm = document.querySelector('#action-link-form');
+      if (linkForm) linkForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const values = Object.fromEntries(new FormData(linkForm).entries());
+        if (values.state === 'completed') values.completed_at = new Date().toISOString();
+        try {
+          await jsonRequest(`/api/fragments/${id}/action-links`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({link: values})});
+          window.location.reload();
+        } catch (error) { status.textContent = error.message; }
+      });
+      retentionPanel?.addEventListener('click', async event => {
+        const card = event.target.closest('.action-link');
+        if (!card) return;
+        const targetId = encodeURIComponent(card.dataset.targetId);
+        const complete = event.target.closest('.action-link-complete');
+        const remove = event.target.closest('.action-link-remove');
+        try {
+          if (complete) await jsonRequest(`/api/fragments/${id}/action-links/${targetId}/complete`, {method: 'POST'});
+          if (remove) await jsonRequest(`/api/fragments/${id}/action-links/${targetId}`, {method: 'DELETE'});
+          if (complete || remove) window.location.reload();
+        } catch (error) { status.textContent = error.message; }
       });
     })();
   </script>

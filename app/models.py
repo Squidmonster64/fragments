@@ -25,6 +25,11 @@ class Fragment(Base):
     memory_class_reason: Mapped[str] = mapped_column(String(500), default="")
     interpretation_json: Mapped[str] = mapped_column(Text, default="")
     routing_review_json: Mapped[str] = mapped_column(Text, default="")
+    # Cross-surface links are recorded only after the owner accepts a reviewed
+    # action. Their completion state governs conservative transient retention.
+    linked_actions_json: Mapped[str] = mapped_column(Text, default="")
+    cleanup_eligible_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cleanup_state: Mapped[str] = mapped_column(String(32), default="kept")
     interpreted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     transcription_provider: Mapped[str] = mapped_column(String(80), default="")
     transcription_model: Mapped[str] = mapped_column(String(120), default="")

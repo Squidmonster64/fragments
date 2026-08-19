@@ -62,4 +62,4 @@ For better recognition of current names, places, boats, assets, and project labe
 
 ## Review and routing safety
 
-The interpretation endpoint is intentionally local and review-only. It preserves the original text, keeps normalised clauses separate, suggests multiple possible routes, gives one short clarification when an important detail is uncertain, and records accept/change/reject choices. It does **not** create a task, reminder, decision, or external record. Future cross-surface actions must remain explicit, owner-reviewed steps.
+The interpretation endpoint preserves the original text, keeps normalised clauses separate, suggests multiple possible routes, gives one short clarification when an important detail is uncertain, and records accept/change/reject choices. **Clear, low-risk Get List and Run & Maintain items may be added immediately** through a server-only, idempotent action service. Each addition retains its source Fragment and has a visible undo path. Ambiguous, consequential, story-sensitive, and unsupported routes remain review-only; they do not create records elsewhere.

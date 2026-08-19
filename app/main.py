@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.orm import Session
 
+from .context_hints import private_context_hint
 from .database import Base, SessionLocal, engine
 from .interpretation import interpret_fragment, valid_memory_class
 from .models import Fragment
@@ -128,6 +129,9 @@ def transcription_hint(fragment: Fragment) -> str:
         parts.append(f"Title: {fragment.title}.")
     if fragment.themes:
         parts.append(f"Themes: {fragment.themes}.")
+    remote_hint = private_context_hint(fragment.themes)
+    if remote_hint:
+        parts.append(remote_hint)
     return " ".join(parts)
 
 

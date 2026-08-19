@@ -56,6 +56,10 @@ OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
 
 `TRANSCRIPTION_PROVIDER` exists so a different server-side provider can be added later without changing the capture screen or the stored Fragment format. Until a key is configured, a recording is still saved safely and the owner can type the words; transcription simply reports that it is not ready.
 
+### Optional private vocabulary hints
+
+For better recognition of current names, places, boats, assets, and project labels, set `TRANSCRIPTION_CONTEXT_URL=https://minutes.hope-johnstone.com/internal/transcription-context` and the same long random `FRAGMENTS_CONTEXT_SECRET` on both the Fragments service and the private control service. This connection sends no audio or transcript to the control service. It receives only a short list of current labels; if it is unavailable, transcription continues with the local hint.
+
 ## Review and routing safety
 
 The interpretation endpoint is intentionally local and review-only. It preserves the original text, keeps normalised clauses separate, suggests multiple possible routes, gives one short clarification when an important detail is uncertain, and records accept/change/reject choices. It does **not** create a task, reminder, decision, or external record. Future cross-surface actions must remain explicit, owner-reviewed steps.

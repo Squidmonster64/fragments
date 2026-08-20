@@ -6,6 +6,7 @@ let stream;
 let chunks = [];
 let recognition;
 let recordedMimeType = '';
+let recordingStartedAt = 0;
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -50,6 +51,7 @@ async function startRecording() {
   recorder = new MediaRecorder(stream, preferred ? {mimeType: preferred} : undefined);
   chunks = [];
   recordedMimeType = recorder.mimeType || preferred || '';
+  recordingStartedAt = performance.now();
   previewEl.hidden = true;
   previewEl.textContent = '';
   recorder.ondataavailable = event => {
@@ -58,9 +60,10 @@ async function startRecording() {
     if (event.data.type) recordedMimeType = event.data.type;
   };
   recorder.onstop = () => { void saveFinishedRecording(); };
-  // Do not use a one-second slice.  Some iPhone browsers can emit only a
-  // container header when the microphone stream is released mid-slice.
-  recorder.start();
+  // Keep delivery continuous. iPhone Safari can otherwise return only a
+  // container header when a short recording is stopped before its first
+  // browser-managed flush.
+  recorder.start(250);
   startPreviewRecognition();
   setButtonState(true);
   statusText.textContent = 'Recording. Tap Stop when you are done.';
@@ -78,9 +81,8 @@ function stopRecording() {
   stopPreviewRecognition();
   statusText.textContent = 'Saving the original recording…';
   button.disabled = true;
-  // Flush the final chunk before stopping.  The microphone remains live only
-  // until MediaRecorder has finished the already-ended capture.
-  try { recorder.requestData(); } catch (_) {}
+  // The final dataavailable event is delivered before onstop. Continuous
+  // chunks above ensure the recording already contains real audio.
   recorder.stop();
 }
 
@@ -103,7 +105,8 @@ async function saveFinishedRecording() {
   const blob = new Blob(chunks, {type: mimeType});
   releaseRecordingStream();
   if (blob.size < 1_024) {
-    statusText.textContent = 'That recording was too short to save. Please record again or type the words.';
+    const seconds = Math.max(0, (performance.now() - recordingStartedAt) / 1000).toFixed(1);
+    statusText.textContent = `Only ${blob.size} bytes arrived after ${seconds}s. The phone did not deliver usable audio; please reload Fragments and try again.`;
     button.disabled = false;
     setButtonState(false);
     return;

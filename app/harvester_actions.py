@@ -23,8 +23,10 @@ def _configured() -> tuple[str, str] | None:
     return (url, secret) if url and secret else None
 
 
-def _idempotency_key(fragment_code: str, candidate: dict[str, Any]) -> str:
-    source = f"{fragment_code}|{candidate.get('type', '')}|{str(candidate.get('title', '')).strip().casefold()}"
+def _idempotency_key(fragment_identity: str, candidate: dict[str, Any]) -> str:
+    """Key actions to an immutable Fragment identity, never its reusable display code."""
+
+    source = f"{fragment_identity}|{candidate.get('type', '')}|{str(candidate.get('title', '')).strip().casefold()}"
     return f"fragment:{hashlib.sha256(source.encode('utf-8')).hexdigest()}"
 
 
@@ -37,8 +39,13 @@ def can_act_immediately(candidate: dict[str, Any]) -> bool:
     )
 
 
-def apply_clear_actions(fragment_code: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Apply only the clear low-risk candidates; return per-candidate outcomes."""
+def apply_clear_actions(fragment_code: str, candidates: list[dict[str, Any]], *, fragment_identity: str | None = None) -> list[dict[str, Any]]:
+    """Apply clear low-risk candidates with a stable action identity.
+
+    ``fragment_code`` stays human-readable in the destination provenance.  The
+    optional identity is used only for idempotency, preventing a new Fragment
+    from replaying an old action if a deleted display code is later reused.
+    """
 
     configured = _configured()
     if not configured:
@@ -50,7 +57,7 @@ def apply_clear_actions(fragment_code: str, candidates: list[dict[str, Any]]) ->
             continue
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
         payload = {
-            "idempotencyKey": _idempotency_key(fragment_code, candidate),
+            "idempotencyKey": _idempotency_key(fragment_identity or fragment_code, candidate),
             "sourceFragmentId": fragment_code,
             "routeType": candidate["type"],
             "title": str(candidate["title"]).strip(),

@@ -428,7 +428,8 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
         learning = learn_explicit_rules(fragment.fragment_code, original_text)
     if learning.get("clarification") and not draft["clarifications"]:
         draft["clarifications"] = [str(learning["clarification"])]
-    outcomes = apply_clear_actions(fragment.fragment_code, draft["candidates"])
+    immutable_identity = f"{fragment.id}:{fragment.created_at.isoformat() if fragment.created_at else ''}"
+    outcomes = apply_clear_actions(fragment.fragment_code, draft["candidates"], fragment_identity=immutable_identity)
     outcome_by_candidate = {str(outcome.get("candidate_id")): outcome for outcome in outcomes}
     for candidate in draft["candidates"]:
         outcome = outcome_by_candidate.get(str(candidate.get("id")))

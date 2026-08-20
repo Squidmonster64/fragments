@@ -30,18 +30,27 @@ try:
     assert choice.status_code == 200, choice.text
     assert choice.json()["message"] == "Review saved. Nothing has been added to another app."
 
+    short_audio = client.post(
+        "/api/fragments",
+        data={"raw_transcript": "", "capture_mode": "voice"},
+        files={"audio": ("header-only.webm", b"tiny", "audio/webm")},
+    )
+    assert short_audio.status_code == 422, short_audio.text
+
+    # This fixture is intentionally not valid audio; it tests durable upload and
+    # the safe downstream transcription failure after passing the header guard.
     audio = client.post(
         "/api/fragments",
         data={"raw_transcript": "", "capture_mode": "voice"},
-        files={"audio": ("test.webm", b"not-a-real-recording", "audio/webm")},
+        files={"audio": ("test.webm", b"not-a-real-recording" * 100, "audio/webm")},
     )
     assert audio.status_code == 200, audio.text
     audio_id = audio.json()["id"]
     created_ids.append(audio_id)
     transcription = client.post(f"/api/fragments/{audio_id}/transcribe")
-    # In local test mode no OpenAI server key is configured. The essential
-    # property is that this fails safely after retaining the original audio.
-    assert transcription.status_code in {502, 503}, transcription.text
+    # The essential property is that provider failure is reviewable after the
+    # original recording has been retained; the endpoint maps it to 422.
+    assert transcription.status_code == 422, transcription.text
 finally:
     for fragment_id in created_ids:
         client.post(f"/fragments/{fragment_id}/delete", follow_redirects=False)

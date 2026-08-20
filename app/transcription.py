@@ -42,33 +42,66 @@ class OpenAITranscriptionProvider:
         self.api_key = api_key
         self.model = model
 
+    def _request(self, audio_path: Path, mime_type: str, hint: str, model: str) -> requests.Response:
+        """Send one completed recording.  The file is reopened for every retry."""
+        with audio_path.open("rb") as audio_file:
+            return requests.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                data={
+                    "model": model,
+                    "response_format": "json",
+                    "language": "en",
+                    # The hint supplies only owner-held context such as titles and themes.
+                    # It is not a replacement transcript and does not change the saved audio.
+                    "prompt": hint[:1_000],
+                },
+                files={"file": (audio_path.name, audio_file, mime_type or "audio/webm")},
+                timeout=120,
+            )
+
+    @staticmethod
+    def _error_detail(response: requests.Response) -> str:
+        try:
+            payload = response.json()
+        except ValueError:
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        error = payload.get("error")
+        if isinstance(error, dict):
+            return str(error.get("message", "")).strip()
+        return str(payload.get("message", "")).strip()
+
+    @staticmethod
+    def _requires_whisper_fallback(response: requests.Response, detail: str, requested_model: str) -> bool:
+        """Keep gpt-transcribe first, but support endpoints restricted to Whisper.
+
+        Some compatible OpenAI gateways accept the audio API but expose only
+        ``whisper-1``.  They state that restriction explicitly.  Retrying only
+        for that exact condition prevents a bad recording, bad key, rate limit,
+        or network error from being hidden by a second request.
+        """
+        if requested_model == "whisper-1" or response.status_code not in {400, 404}:
+            return False
+        wording = detail.casefold()
+        return "whisper-1" in wording and ("only" in wording or "supported" in wording or "model" in wording)
+
     def transcribe(self, audio_path: Path, mime_type: str, hint: str) -> TranscriptionResult:
         if not audio_path.exists() or not audio_path.is_file():
             raise TranscriptionProviderError("The original recording could not be found.")
+        selected_model = self.model
         try:
-            with audio_path.open("rb") as audio_file:
-                response = requests.post(
-                    "https://api.openai.com/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    data={
-                        "model": self.model,
-                        "response_format": "json",
-                        "language": "en",
-                        # The hint supplies only owner-held context such as titles and themes.
-                        # It is not a replacement transcript and does not change the saved audio.
-                        "prompt": hint[:1_000],
-                    },
-                    files={"file": (audio_path.name, audio_file, mime_type or "audio/webm")},
-                    timeout=120,
-                )
+            response = self._request(audio_path, mime_type, hint, selected_model)
+            detail = self._error_detail(response)
+            if self._requires_whisper_fallback(response, detail, selected_model):
+                selected_model = "whisper-1"
+                response = self._request(audio_path, mime_type, hint, selected_model)
+                detail = self._error_detail(response)
         except requests.RequestException as error:
             raise TranscriptionProviderError("The transcription service could not be reached. The original recording is still safe here.") from error
         if not response.ok:
-            try:
-                detail = response.json().get("error", {}).get("message", "")
-            except ValueError:
-                detail = ""
-            safe_detail = str(detail).strip().replace("\n", " ")[:220]
+            safe_detail = detail.replace("\n", " ")[:220]
             raise TranscriptionProviderError(f"The transcription service could not finish this recording{': ' + safe_detail if safe_detail else '.'}")
         try:
             payload = response.json()
@@ -77,7 +110,7 @@ class OpenAITranscriptionProvider:
         text = str(payload.get("text", "")).strip()
         if not text:
             raise TranscriptionProviderError("No words were returned for this recording. You can still type the words yourself.")
-        return TranscriptionResult(text=text, provider=self.name, model=self.model)
+        return TranscriptionResult(text=text, provider=self.name, model=selected_model)
 
 
 def configured_transcription_provider() -> TranscriptionProvider:

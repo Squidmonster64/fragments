@@ -31,4 +31,4 @@
   </section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/recorder.js" defer></script><script>document.querySelector('#cleanup-eligible')?.addEventListener('click',async()=>{if(!confirm('Remove only the eligible Transient Fragments and their original audio? This cannot be undone.'))return;const r=await fetch('/api/fragments/cleanup-eligible',{method:'POST'}),b=await r.json();if(!r.ok){alert(b.error||'Could not clean up those Fragments.');return}alert(b.message);location.reload()});</script>{% endblock %}
+{% block scripts %}<script src="/static/recorder.js?v=voice-repair-1" defer></script><script>document.querySelector('#cleanup-eligible')?.addEventListener('click',async()=>{if(!confirm('Remove only the eligible Transient Fragments and their original audio? This cannot be undone.'))return;const r=await fetch('/api/fragments/cleanup-eligible',{method:'POST'}),b=await r.json();if(!r.ok){alert(b.error||'Could not clean up those Fragments.');return}alert(b.message);location.reload()});</script>{% endblock %}

@@ -65,6 +65,19 @@ function stopRecording() {
   stream?.getTracks().forEach(track => track.stop());
 }
 
+async function transcriptionErrorMessage(response) {
+  const fallback = 'Automatic transcription could not finish just yet. The original recording is safe. Open the Fragment and try Transcribe recording again.';
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) return fallback;
+  try {
+    const body = await response.json();
+    const detail = String(body.detail || body.message || '').trim();
+    return detail || fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 async function saveFinishedRecording() {
   const mimeType = recorder.mimeType || 'audio/webm';
   const extension = mimeType.includes('mp4') ? 'm4a' : 'webm';
@@ -83,7 +96,7 @@ async function saveFinishedRecording() {
       window.location.assign(`${result.url}?transcribed=1`);
       return;
     }
-    const error = await transcription.text();
+    const error = await transcriptionErrorMessage(transcription);
     sessionStorage.setItem('bloody-daves:fragments:transcription-error', error);
     window.location.assign(`${result.url}?transcription=not-ready`);
   } catch (error) {

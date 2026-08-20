@@ -95,8 +95,12 @@
       }
       async function jsonRequest(path, options = {}) {
         const response = await fetch(path, options);
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw Error(body.detail || body.message || 'That did not work. The original Fragment is still safe.');
+        const contentType = response.headers.get('content-type') || '';
+        const body = contentType.includes('application/json') ? await response.json().catch(() => ({})) : {};
+        if (!response.ok) {
+          const fallback = 'That did not work. The original Fragment is still safe.';
+          throw Error(String(body.detail || body.message || fallback).replace(/<[^>]*>/g, '').slice(0, 360));
+        }
         return body;
       }
       if (transcribeButton) transcribeButton.addEventListener('click', async () => {

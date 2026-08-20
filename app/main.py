@@ -375,7 +375,9 @@ def transcribe_fragment(fragment_id: int, db: Session = Depends(get_db)):
     except TranscriptionConfigurationError as error:
         raise HTTPException(503, str(error)) from error
     except TranscriptionProviderError as error:
-        raise HTTPException(502, str(error)) from error
+        # A completed recording remains saved for retry.  This is a reviewable
+        # provider outcome, not a broken gateway or a replacement transcript.
+        raise HTTPException(422, str(error)) from error
     previous_text = fragment.raw_transcript.strip()
     fragment.raw_transcript = result.text
     if not fragment.edited_version.strip() or fragment.edited_version.strip() == previous_text:

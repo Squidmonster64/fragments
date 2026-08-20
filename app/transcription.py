@@ -7,12 +7,15 @@ keep listening after the client has stopped the recorder.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionConfigurationError(RuntimeError):
@@ -102,6 +105,14 @@ class OpenAITranscriptionProvider:
             raise TranscriptionProviderError("The transcription service could not be reached. The original recording is still safe here.") from error
         if not response.ok:
             safe_detail = detail.replace("\n", " ")[:220]
+            # Keep the full recording and secret key private, but make the
+            # upstream status diagnosable in the service log.
+            logger.warning(
+                "Finished-recording transcription failed: status=%s model=%s detail=%s",
+                response.status_code,
+                selected_model,
+                safe_detail or "(no JSON error detail)",
+            )
             raise TranscriptionProviderError(f"The transcription service could not finish this recording{': ' + safe_detail if safe_detail else '.'}")
         try:
             payload = response.json()

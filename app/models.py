@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -18,6 +18,9 @@ class Fragment(Base):
     # What was heard or written stays separate from every later interpretation.
     audio_path: Mapped[str] = mapped_column(String(500), default="")
     audio_mime_type: Mapped[str] = mapped_column(String(100), default="audio/webm")
+    # The original finished recording is stored with the durable Fragment row.
+    # audio_path remains for compatibility with earlier file-backed recordings.
+    audio_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     # These fields describe preservation and review only. They never create work
     # in another surface by themselves.

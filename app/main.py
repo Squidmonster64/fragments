@@ -51,6 +51,9 @@ def ensure_fragment_columns() -> None:
         "transcription_provider": "VARCHAR(80) NOT NULL DEFAULT ''",
         "transcription_model": "VARCHAR(120) NOT NULL DEFAULT ''",
         "transcribed_at": "DATETIME",
+        # MySQL LONGBLOB keeps original recordings with their durable Fragment.
+        # SQLite accepts this affinity too for local development and tests.
+        "audio_data": "LONGBLOB",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():
@@ -138,18 +141,21 @@ def audio_extension(mime_type: str, filename: str) -> str:
     return ".webm"
 
 
-async def save_finished_audio(audio: UploadFile | None, fragment_code: str) -> tuple[str, str]:
+async def save_finished_audio(audio: UploadFile | None, fragment_code: str) -> tuple[str, str, bytes]:
     if not audio or not audio.filename:
-        return "", ""
+        return "", "", b""
     payload = await audio.read()
     if not payload:
         raise HTTPException(400, "The recording was empty. Please try again or type the words instead.")
-    if len(payload) > 80 * 1024 * 1024:
-        raise HTTPException(413, "That recording is too large to save here. Please make a shorter fragment.")
+    # Keep a practical margin beneath managed MySQL's usual packet limit.
+    if len(payload) > 45 * 1024 * 1024:
+        raise HTTPException(413, "That recording is too large to keep safely. Please make a shorter fragment.")
     mime_type = (audio.content_type or "audio/webm").strip()[:100]
     filename = f"{fragment_code}-{uuid4().hex}{audio_extension(mime_type, audio.filename)}"
+    # The local copy gives the current request immediate file access.  payload is
+    # also stored with the Fragment row, so a later deployment cannot lose it.
     (AUDIO_DIR / filename).write_bytes(payload)
-    return filename, mime_type
+    return filename, mime_type, payload
 
 
 def transcription_hint(fragment: Fragment) -> str:
@@ -262,7 +268,7 @@ async def create_fragment(
     if not text and (not audio or not audio.filename):
         raise HTTPException(400, "Write something or record a fragment before saving it.")
     fragment_code = next_fragment_code(db)
-    audio_path, audio_mime_type = await save_finished_audio(audio, fragment_code)
+    audio_path, audio_mime_type, audio_data = await save_finished_audio(audio, fragment_code)
     fragment = Fragment(
         fragment_code=fragment_code,
         title=title.strip() or "Untitled fragment",
@@ -271,6 +277,7 @@ async def create_fragment(
         edited_version=text,
         audio_path=audio_path,
         audio_mime_type=audio_mime_type,
+        audio_data=audio_data or None,
         processing_state="awaiting_transcription" if audio_path else "unprocessed",
     )
     db.add(fragment)
@@ -359,6 +366,10 @@ def transcribe_fragment(fragment_id: int, db: Session = Depends(get_db)):
     if not fragment.audio_path:
         raise HTTPException(400, "There is no saved recording to transcribe. You can type the words instead.")
     audio_path = AUDIO_DIR / fragment.audio_path
+    # Recreate a temporary working file from the durable recording after a
+    # deployment, then pass that ordinary file to the transcription provider.
+    if not audio_path.exists() and fragment.audio_data:
+        audio_path.write_bytes(fragment.audio_data)
     try:
         result = transcribe_finished_recording(audio_path, fragment.audio_mime_type, transcription_hint(fragment))
     except TranscriptionConfigurationError as error:
@@ -668,6 +679,12 @@ def get_audio(fragment_id: int, db: Session = Depends(get_db)):
     fragment = db.get(Fragment, fragment_id)
     if not fragment:
         raise HTTPException(404, "Fragment not found")
+    if fragment.audio_data:
+        return Response(
+            content=fragment.audio_data,
+            media_type=fragment.audio_mime_type or "audio/webm",
+            headers={"Content-Disposition": f'inline; filename="{fragment.audio_path or fragment.fragment_code}"'},
+        )
     path = AUDIO_DIR / fragment.audio_path
     if not path.exists():
         raise HTTPException(404, "Audio file missing")

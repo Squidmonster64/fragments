@@ -5,6 +5,7 @@ let recorder;
 let stream;
 let chunks = [];
 let recognition;
+let recordedMimeType = '';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -42,17 +43,33 @@ function stopPreviewRecognition() {
 
 async function startRecording() {
   stream = await navigator.mediaDevices.getUserMedia({audio: true});
-  const preferred = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+  // Safari may record MP4 while Chromium commonly records WebM.  Ask for a
+  // supported format, then keep the type the recorder actually returns.
+  const preferred = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm']
+    .find(type => MediaRecorder.isTypeSupported(type));
   recorder = new MediaRecorder(stream, preferred ? {mimeType: preferred} : undefined);
   chunks = [];
+  recordedMimeType = recorder.mimeType || preferred || '';
   previewEl.hidden = true;
   previewEl.textContent = '';
-  recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
-  recorder.onstop = saveFinishedRecording;
-  recorder.start(1_000);
+  recorder.ondataavailable = event => {
+    if (!event.data || !event.data.size) return;
+    chunks.push(event.data);
+    if (event.data.type) recordedMimeType = event.data.type;
+  };
+  recorder.onstop = () => { void saveFinishedRecording(); };
+  // Do not use a one-second slice.  Some iPhone browsers can emit only a
+  // container header when the microphone stream is released mid-slice.
+  recorder.start();
   startPreviewRecognition();
   setButtonState(true);
   statusText.textContent = 'Recording. Tap Stop when you are done.';
+}
+
+function releaseRecordingStream() {
+  stream?.getTracks().forEach(track => track.stop());
+  stream = undefined;
+  recorder = undefined;
 }
 
 function stopRecording() {
@@ -61,8 +78,10 @@ function stopRecording() {
   stopPreviewRecognition();
   statusText.textContent = 'Saving the original recording…';
   button.disabled = true;
+  // Flush the final chunk before stopping.  The microphone remains live only
+  // until MediaRecorder has finished the already-ended capture.
+  try { recorder.requestData(); } catch (_) {}
   recorder.stop();
-  stream?.getTracks().forEach(track => track.stop());
 }
 
 async function transcriptionErrorMessage(response) {
@@ -79,9 +98,16 @@ async function transcriptionErrorMessage(response) {
 }
 
 async function saveFinishedRecording() {
-  const mimeType = recorder.mimeType || 'audio/webm';
-  const extension = mimeType.includes('mp4') ? 'm4a' : 'webm';
+  const mimeType = chunks.find(chunk => chunk.type)?.type || recordedMimeType || 'audio/webm';
+  const extension = mimeType.includes('mp4') || mimeType.includes('m4a') ? 'm4a' : 'webm';
   const blob = new Blob(chunks, {type: mimeType});
+  releaseRecordingStream();
+  if (blob.size < 1_024) {
+    statusText.textContent = 'That recording was too short to save. Please record again or type the words.';
+    button.disabled = false;
+    setButtonState(false);
+    return;
+  }
   const form = new FormData();
   form.append('audio', blob, `fragment.${extension}`);
   form.append('raw_transcript', '');

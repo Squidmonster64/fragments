@@ -147,6 +147,10 @@ async def save_finished_audio(audio: UploadFile | None, fragment_code: str) -> t
     payload = await audio.read()
     if not payload:
         raise HTTPException(400, "The recording was empty. Please try again or type the words instead.")
+    # A tiny container header is not a usable recording.  Reject it before a
+    # Fragment is created, rather than leaving an impossible transcription job.
+    if len(payload) < 1_024:
+        raise HTTPException(422, "That recording ended before any usable audio was saved. Please record again or type the words instead.")
     # Keep a practical margin beneath managed MySQL's usual packet limit.
     if len(payload) > 45 * 1024 * 1024:
         raise HTTPException(413, "That recording is too large to keep safely. Please make a shorter fragment.")

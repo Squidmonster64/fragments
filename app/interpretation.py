@@ -156,6 +156,9 @@ def _extract_candidates(clauses: list[str]) -> list[dict[str, Any]]:
             elif CHANGE_SIGNAL.search(clause):
                 found.append(_candidate("daybook", raw_clause, 0.63, title="Review today’s plan change", requires_confirmation=True, metadata={"change_signal": True}))
             if DECISION_WORDS.search(clause):
+                # A clear decision can mention a house, tax or a repair; that
+                # context is part of the decision, not a second maintenance job.
+                found = [item for item in found if item["type"] != "run_maintain"]
                 found.append(_candidate("decision", raw_clause, 0.84, title=_title_from_clause(clause), requires_confirmation=False))
             elif IDEA_WORDS.search(clause):
                 found.append(_candidate("opportunity", raw_clause, 0.72, title=_title_from_clause(clause), requires_confirmation=True))
@@ -169,7 +172,7 @@ def _extract_candidates(clauses: list[str]) -> list[dict[str, Any]]:
                 found.append(_candidate("daybook", raw_clause, 0.7, title="Add to today’s review", metadata={"reflection": True}))
             if re.search(r"\b(?:wouldn't mind|would not mind|maybe|might|could|someday|later)\b", lower) and not found:
                 found.append(_candidate("holding", raw_clause, 0.68, title=_title_from_clause(clause)))
-            if (re.search(r"\b(?:need to|i need to|i should|todo|to do|organise)\b", lower) or DEFERRED_CRAP.search(clause)) and not any(item["type"] in {"reminder", "run_maintain", "get_list", "ask_ai"} for item in found):
+            if (re.search(r"\b(?:need to|i need to|i should|todo|to do|organise)\b", lower) or DEFERRED_CRAP.search(clause)) and not WEEKLY_REVIEW.search(" ".join(clauses)) and not any(item["type"] in {"reminder", "run_maintain", "get_list", "ask_ai", "weekly_review"} for item in found):
                 found.append(_candidate("shitlist", raw_clause, 0.68, title=_title_from_clause(clause)))
         for item in found:
             key = (item["type"], item["title"].casefold())
@@ -182,8 +185,10 @@ def _extract_candidates(clauses: list[str]) -> list[dict[str, Any]]:
 def classify_memory(original_text: str, candidates: list[dict[str, Any]]) -> tuple[str, str]:
     """Return the retention class; permanent always wins for mixed material."""
 
-    if PERMANENT_WORDS.search(original_text):
-        return "permanent", "It contains story, family, reflection, or legacy language, so it stays permanently."
+    if PERMANENT_WORDS.search(original_text) or (IDEA_WORDS.search(original_text) and "book" in original_text.lower()):
+        return "permanent", "It contains story, family, reflection, legacy material, or a book idea, so it stays permanently."
+    if candidates and all(item["type"] == "ask_ai" for item in candidates):
+        return "reference", "It is a question for retrieval, not new work to create."
     if REFERENCE_WORDS.search(original_text) or any(item["type"] in {"weekly_review", "daybook", "opportunity", "holding", "fieldbook"} for item in candidates):
         return "reference", "It is useful context, a reflection, or something worth keeping for later review."
     if TRANSIENT_WORDS.search(original_text) or any(item["type"] not in {"ask_ai"} for item in candidates):

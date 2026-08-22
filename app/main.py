@@ -3,6 +3,7 @@ from pathlib import Path
 import io
 import json
 import re
+from urllib.parse import quote
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -10,10 +11,19 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, inspect, or_, select
+from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 
 from .context_hints import private_context_hint
+from .auth import (
+    COOKIE_NAME,
+    auth_is_configured,
+    cookie_secure,
+    issue_session,
+    passphrase_matches,
+    session_max_age,
+    valid_session,
+)
 from .harvester_actions import apply_clear_actions, undo_action
 from .harvester_rules import learn_explicit_rules, revoke_learned_rule
 from .database import Base, SessionLocal, engine
@@ -65,6 +75,114 @@ ensure_fragment_columns()
 app = FastAPI(title="Fragments")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
+
+
+def public_path(path: str) -> bool:
+    return path == "/health" or path == "/auth/login" or path.startswith("/static/")
+
+
+def local_next_path(value: str) -> str:
+    value = value.strip()
+    if (
+        value.startswith("/")
+        and not value.startswith("//")
+        and "\\" not in value
+        and not any(ord(character) < 32 for character in value)
+    ):
+        return value
+    return "/"
+
+
+@app.middleware("http")
+async def require_owner_authentication(request: Request, call_next):
+    path = request.url.path
+    authenticated = valid_session(request.cookies.get(COOKIE_NAME))
+    request.state.authenticated = authenticated
+    if not public_path(path) and not authenticated:
+        if path.startswith("/api/"):
+            return JSONResponse(
+                {"detail": "Authentication required."},
+                status_code=401,
+                headers={"Cache-Control": "no-store"},
+            )
+        destination = local_next_path(path)
+        if request.url.query:
+            destination = f"{destination}?{request.url.query}"
+        return RedirectResponse(
+            f"/auth/login?next={quote(destination, safe='')}",
+            status_code=303,
+            headers={"Cache-Control": "no-store"},
+        )
+    response = await call_next(request)
+    if not path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/auth/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/"):
+    if request.state.authenticated:
+        return RedirectResponse(local_next_path(next), status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "next": local_next_path(next),
+            "configured": auth_is_configured(),
+            "invalid": False,
+        },
+    )
+
+
+@app.post("/auth/login", response_class=HTMLResponse)
+def login(request: Request, passphrase: str = Form(...), next: str = Form("/")):
+    destination = local_next_path(next)
+    if not auth_is_configured():
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "next": destination,
+                "configured": False,
+                "invalid": False,
+            },
+            status_code=503,
+        )
+    if not passphrase_matches(passphrase):
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "next": destination,
+                "configured": True,
+                "invalid": True,
+            },
+            status_code=401,
+        )
+    response = RedirectResponse(destination, status_code=303)
+    response.set_cookie(
+        COOKIE_NAME,
+        issue_session(),
+        max_age=session_max_age(),
+        httponly=True,
+        secure=cookie_secure(),
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/auth/logout")
+def logout():
+    response = RedirectResponse("/auth/login", status_code=303)
+    response.delete_cookie(
+        COOKIE_NAME,
+        httponly=True,
+        secure=cookie_secure(),
+        samesite="strict",
+        path="/",
+    )
+    return response
 
 
 def get_db():
@@ -759,6 +877,5 @@ async def import_backup(backup: UploadFile = File(...), db: Session = Depends(ge
 
 
 @app.get("/health")
-def health(db: Session = Depends(get_db)):
-    count = db.scalar(select(func.count()).select_from(Fragment))
-    return {"ok": True, "fragments": count, "time": datetime.utcnow().isoformat() + "Z"}
+def health():
+    return {"ok": True}

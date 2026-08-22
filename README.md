@@ -27,6 +27,19 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Open `http://localhost:8000`.
 
+## Private login
+
+Set `FRAGMENTS_AUTH_PASSPHRASE` to a unique passphrase of at least 20 characters in the server
+environment. Fragments fails closed when it is missing: only the login page,
+public static assets, and a non-disclosing `/health` response remain available.
+The passphrase stays server-side and creates an HttpOnly, SameSite session
+cookie after login.
+
+Cookies are Secure by default. For plain-HTTP local development only, set
+`FRAGMENTS_COOKIE_SECURE=false`; hosted use must keep the default and run behind
+HTTPS. `FRAGMENTS_SESSION_MAX_AGE` can optionally change the seven-day session
+lifetime.
+
 ## Phone use
 
 Microphone recording requires HTTPS except on localhost. For actual phone use, deploy this app behind HTTPS on a service such as Render, Railway, Fly.io or a small VPS. Persistent storage must include both:

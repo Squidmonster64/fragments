@@ -11,7 +11,7 @@
 <body>
   <header class="topbar">
     <a class="suite-brand" href="/"><span>Bloody Dave's</span><strong>Fragments</strong></a>
-    <nav aria-label="Bloody Dave's Suite"><a href="https://recipes.bloodydaves.com">Recipes</a><a class="current" href="/">Fragments</a><a href="https://timer.bloodydaves.com">Quiet Timer</a><a href="https://list.bloodydaves.com">Get List</a><a href="https://lift.bloodydaves.com">Lift Log</a></nav>
+    <nav aria-label="Bloody Dave's Suite"><a href="https://recipes.bloodydaves.com">Recipes</a><a class="current" href="/">Fragments</a><a href="https://timer.bloodydaves.com">Quiet Timer</a><a href="https://list.bloodydaves.com">Get List</a><a href="https://lift.bloodydaves.com">Lift Log</a>{% if request.state.authenticated %}<form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>{% endif %}</nav>
   </header>
   <main>{% block content %}{% endblock %}</main>
   <footer class="suite-footer">Part of the independently run Bloody Dave's Suite.</footer>

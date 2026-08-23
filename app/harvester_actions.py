@@ -18,7 +18,7 @@ import requests
 from app.harvester_contract import HARVESTER_CONTRACT_VERSION, build_action_request, parse_action_response
 from app.interpretation import DESTRUCTIVE
 
-ALLOWED_ROUTE_TYPES = {"get_list", "run_maintain", "reminder"}
+ALLOWED_ROUTE_TYPES = {"get_list", "run_maintain", "reminder", "decision"}
 
 
 def _configured() -> tuple[str, str] | None:
@@ -119,7 +119,7 @@ def apply_clear_actions(
                 "status": "acted",
                 "message": parsed.get("reason") or "Added.",
                 "action_id": parsed.get("action_id"),
-                "target_app": "Get List" if candidate["type"] == "get_list" else "Hope Task" if candidate["type"] == "reminder" else "Run & Maintain",
+                "target_app": "Get List" if candidate["type"] == "get_list" else "Hope Task" if candidate["type"] == "reminder" else "Decisions" if candidate["type"] == "decision" else "Run & Maintain",
                 "target_type": target_kind,
                 "target_id": parsed.get("resulting_entity_id"),
                 "created_target": parsed.get("idempotency_outcome") == "created",

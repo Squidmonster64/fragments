@@ -46,7 +46,7 @@ IDEA_WORDS = re.compile(r"\b(?:great idea|idea for|possible|opportunity|could bu
 DEFERRED_CRAP = re.compile(r"\b(?:sort|cancel|deal with|clean out|dripping|shelf|garage|subscription|paperwork)\b", re.IGNORECASE)
 REFLECTION = re.compile(r"\b(?:i didn't|i did not|i feel|i'm tired|i am tired|need a break|warm sun|fresh[- ]cut grass)\b", re.IGNORECASE)
 CHANGE_SIGNAL = re.compile(r"\b(?:this isn't working|this is not working|change tack|change the plan|scrap (?:this|that)|changed my mind|bad idea|do it differently)\b", re.IGNORECASE)
-DECISION_WORDS = re.compile(r"\b(?:i've decided|i have decided|we've decided|we have decided|i decided|we decided|i'm going with|we're going with|i choose|we choose)\b", re.IGNORECASE)
+DECISION_WORDS = re.compile(r"\b(?:i've decided|i have decided|we've decided|we have decided|i decided|we decided|i'm going with|we're going with|i choose|we choose|i need to decide|should we|should i|i'm thinking about|thinking about (?:changing|hiring|renewing)|renew this lease|hire another)\b", re.IGNORECASE)
 WEEKLY_REVIEW = re.compile(r"\b(?:weekly review|bring this up|bring it up)\b", re.IGNORECASE)
 
 DESTINATIONS = {
@@ -221,7 +221,7 @@ def _extract_candidates(clauses: list[str]) -> list[dict[str, Any]]:
         clause, corrected = _corrected_clause(raw_clause)
         lower = clause.lower()
         found: list[dict[str, Any]] = []
-        if _is_question(clause):
+        if _is_question(clause) and not DECISION_WORDS.search(clause):
             found.append(_candidate("ask_ai", raw_clause, 0.9, title="Answer this question", metadata={"question": clause, "correction_applied": corrected}))
         else:
             purchase = PURCHASE.search(clause) or re.search(r"\b(?:shopping list|get list)\b", lower)
@@ -245,7 +245,7 @@ def _extract_candidates(clauses: list[str]) -> list[dict[str, Any]]:
                 # A clear decision can mention a house, tax or a repair; that
                 # context is part of the decision, not a second maintenance job.
                 found = [item for item in found if item["type"] != "run_maintain"]
-                found.append(_candidate("decision", raw_clause, 0.84, title=_title_from_clause(clause), requires_confirmation=False))
+                found.append(_candidate("decision", raw_clause, 0.84, title=_title_from_clause(clause), requires_confirmation=True))
             elif IDEA_WORDS.search(clause):
                 found.append(_candidate("opportunity", raw_clause, 0.72, title=_title_from_clause(clause), requires_confirmation=True))
             if re.search(r"\b(?:save|keep|reference|bookmark|website|link|pdf|photo|article|quote|mantra)\b", lower):

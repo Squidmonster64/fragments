@@ -40,5 +40,6 @@ class Fragment(Base):
     processing_state: Mapped[str] = mapped_column(String(32), default="unprocessed")
     processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_handoff_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_capture_id: Mapped[str] = mapped_column(String(80), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

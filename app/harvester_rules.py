@@ -36,6 +36,26 @@ def learn_explicit_rules(fragment_code: str, source_text: str) -> dict[str, Any]
         return {"rules": [], "clarification": None}
 
 
+def list_active_rules() -> list[dict[str, Any]]:
+    configured = _configured()
+    if not configured:
+        return []
+    url, secret = configured
+    try:
+        response = requests.get(
+            f"{url}/internal/harvester/rules",
+            headers={"x-fragments-harvester-secret": secret},
+            timeout=5,
+        )
+        if not response.ok:
+            return []
+        payload = response.json()
+        rules = payload.get("rules") if isinstance(payload, dict) else payload
+        return [rule for rule in rules if isinstance(rule, dict)] if isinstance(rules, list) else []
+    except (requests.RequestException, ValueError):
+        return []
+
+
 def revoke_learned_rule(rule_id: str) -> bool:
     configured = _configured()
     if not configured or not rule_id:

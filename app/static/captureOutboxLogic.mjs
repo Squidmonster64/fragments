@@ -16,13 +16,16 @@ export function shouldUpload(entry) {
   return entry.serverFragmentId == null;
 }
 
-export function buildCaptureEntry({ id, blob, mimeType, extension, createdAt = Date.now() }) {
+export function buildCaptureEntry({ id, blob, mimeType, extension, createdAt = Date.now(), kind = 'voice', rawText = '', title = '' }) {
   return {
     id,
     createdAt,
-    audioBlob: blob,
-    mimeType,
-    extension,
+    kind,
+    rawText,
+    title,
+    audioBlob: blob || null,
+    mimeType: mimeType || (kind === 'typed' ? 'text/plain' : ''),
+    extension: extension || (kind === 'typed' ? 'txt' : ''),
     status: OUTBOX_STATUS.SAVED_LOCALLY,
     retryCount: 0,
     lastError: null,
@@ -31,7 +34,48 @@ export function buildCaptureEntry({ id, blob, mimeType, extension, createdAt = D
   };
 }
 
+export function buildTypedCaptureEntry({ id, rawText, title = '', createdAt = Date.now() }) {
+  return buildCaptureEntry({ id, createdAt, kind: 'typed', rawText, title });
+}
+
+export function isTypedCapture(entry) {
+  return entry?.kind === 'typed';
+}
+
+async function processTypedCapture(entry, deps) {
+  const { uploadCapture, updateEntry, removeEntry } = deps;
+  let current = { ...entry };
+  if (shouldUpload(current)) {
+    await updateEntry(current.id, { status: OUTBOX_STATUS.UPLOADING, lastError: null });
+    current = { ...current, status: OUTBOX_STATUS.UPLOADING, lastError: null };
+    const uploaded = await uploadCapture(current);
+    await updateEntry(current.id, {
+      serverFragmentId: uploaded.id,
+      fragmentUrl: uploaded.url,
+      status: OUTBOX_STATUS.UPLOADING,
+      lastError: null,
+    });
+    current = {
+      ...current,
+      serverFragmentId: uploaded.id,
+      fragmentUrl: uploaded.url,
+      status: OUTBOX_STATUS.UPLOADING,
+      lastError: null,
+    };
+  }
+  await updateEntry(current.id, { status: OUTBOX_STATUS.SYNCED, lastError: null });
+  await removeEntry(current.id);
+  return {
+    entry: { ...current, status: OUTBOX_STATUS.SYNCED, lastError: null },
+    outcome: 'synced',
+    uploaded: { id: current.serverFragmentId, url: current.fragmentUrl },
+  };
+}
+
 export async function processCaptureEntry(entry, deps) {
+  if (isTypedCapture(entry)) {
+    return processTypedCapture(entry, deps);
+  }
   const { uploadCapture, transcribeCapture, updateEntry, removeEntry } = deps;
   let current = { ...entry };
 
@@ -133,9 +177,11 @@ export function createOutboxController(store, network = {}) {
       throw new Error('transcribeCapture not configured');
     });
 
-  async function enqueue({ blob, mimeType, extension }) {
+  async function enqueue(input) {
     const id = crypto.randomUUID();
-    const entry = buildCaptureEntry({ id, blob, mimeType, extension });
+    const entry = input.kind === 'typed' || input.rawText != null
+      ? buildTypedCaptureEntry({ id, rawText: input.rawText || '', title: input.title || '' })
+      : buildCaptureEntry({ id, blob: input.blob, mimeType: input.mimeType, extension: input.extension });
     await store.add(entry);
     return entry;
   }

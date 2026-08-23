@@ -98,9 +98,17 @@ async function transcriptionErrorMessage(response) {
 
 async function uploadCapture(entry) {
   const form = new FormData();
-  form.append('audio', entry.audioBlob, `fragment.${entry.extension}`);
-  form.append('raw_transcript', '');
-  form.append('capture_mode', 'voice');
+  if (entry.kind === 'typed') {
+    form.append('raw_transcript', entry.rawText || '');
+    form.append('title', entry.title || '');
+    form.append('capture_mode', 'typed');
+    form.append('client_capture_id', entry.id);
+  } else {
+    form.append('audio', entry.audioBlob, `fragment.${entry.extension}`);
+    form.append('raw_transcript', '');
+    form.append('capture_mode', 'voice');
+    form.append('client_capture_id', entry.id);
+  }
   const saved = await fetch('/api/fragments', {
     method: 'POST',
     body: form,
@@ -159,7 +167,28 @@ async function refreshOutboxStatus() {
 
 window.CaptureOutbox.refreshOutboxStatus = refreshOutboxStatus;
 
+function bindTypedCapture() {
+  const form = document.querySelector('.typed-capture form');
+  if (!form || form.dataset.outboxBound) return;
+  form.dataset.outboxBound = 'true';
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const rawText = String(form.raw_transcript?.value || '').trim();
+    const title = String(form.title?.value || '').trim();
+    if (!rawText) return;
+    form.reset();
+    await controller.enqueue({ kind: 'typed', rawText, title });
+    await refreshOutboxStatus();
+    void controller.processQueue({
+      onStatus: () => refreshOutboxStatus(),
+      onComplete: () => refreshOutboxStatus(),
+      onError: () => refreshOutboxStatus(),
+    });
+  });
+}
+
 function bindOutboxLifecycle() {
+  bindTypedCapture();
   const runQueue = () => {
     void controller.processQueue({
       onStatus: () => refreshOutboxStatus(),

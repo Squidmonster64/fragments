@@ -25,7 +25,7 @@ from .auth import (
     valid_session,
 )
 from .harvester_actions import apply_clear_actions, undo_action
-from .harvester_rules import learn_explicit_rules, revoke_learned_rule
+from .harvester_rules import learn_explicit_rules, list_active_rules, revoke_learned_rule
 from .database import Base, SessionLocal, engine
 from .interpretation import interpret_fragment, valid_memory_class
 from .models import Fragment
@@ -38,7 +38,7 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 STATUSES = ["Draft", "In revision", "Edited", "Final", "Archived"]
 THEMES = ["Absence", "Childhood", "Family", "Grief", "Identity", "Loss", "Love", "Memory", "Place", "Relationships", "Travel"]
 MEMORY_CLASSES = ["permanent", "reference", "transient", "unclassified"]
-ROUTING_REVIEW_STATUSES = {"proposed", "accepted", "edited", "rejected"}
+ROUTING_REVIEW_STATUSES = {"proposed", "accepted", "edited", "rejected", "escalated"}
 Base.metadata.create_all(bind=engine)
 
 
@@ -64,6 +64,7 @@ def ensure_fragment_columns() -> None:
         # MySQL LONGBLOB keeps original recordings with their durable Fragment.
         # SQLite accepts this affinity too for local development and tests.
         "audio_data": "LONGBLOB",
+        "client_capture_id": "VARCHAR(80) NOT NULL DEFAULT ''",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():
@@ -321,6 +322,21 @@ def fragment_markdown(fragment: Fragment) -> str:
 ## Notes
 
 {fragment.notes or ''}
+
+---
+
+## Structured interpretation
+
+{json.dumps(interpretation_for(fragment) or {}, indent=2)}
+
+---
+
+## Provenance
+
+- Originating app: fragments
+- Source: {'voice' if fragment.audio_path else 'typed'}
+- Client capture: {fragment.client_capture_id or '—'}
+- Routing review: {json.dumps(review_for(fragment) or {}, indent=2)}
 """
 
 
@@ -384,9 +400,15 @@ async def create_fragment(
     raw_transcript: str = Form(""),
     audio: UploadFile | None = File(None),
     capture_mode: str = Form(""),
+    client_capture_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     text = raw_transcript.strip()
+    capture_id = client_capture_id.strip()[:80]
+    if capture_id:
+        existing = db.scalars(select(Fragment).where(Fragment.client_capture_id == capture_id)).first()
+        if existing:
+            return {"id": existing.id, "url": f"/fragments/{existing.id}", "duplicate": True, "transcription_pending": bool(existing.audio_path and not existing.raw_transcript)}
     if not text and (not audio or not audio.filename):
         raise HTTPException(400, "Write something or record a fragment before saving it.")
     fragment_code = next_fragment_code(db)
@@ -400,13 +422,14 @@ async def create_fragment(
         audio_path=audio_path,
         audio_mime_type=audio_mime_type,
         audio_data=audio_data or None,
+        client_capture_id=capture_id,
         processing_state="awaiting_transcription" if audio_path else "unprocessed",
     )
     db.add(fragment)
     db.commit()
     db.refresh(fragment)
-    if capture_mode == "voice":
-        return {"id": fragment.id, "url": f"/fragments/{fragment.id}", "transcription_pending": bool(audio_path)}
+    if capture_mode in {"voice", "typed"}:
+        return {"id": fragment.id, "url": f"/fragments/{fragment.id}", "duplicate": False, "transcription_pending": bool(audio_path)}
     return RedirectResponse(f"/fragments/{fragment.id}", status_code=303)
 
 
@@ -529,7 +552,7 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
     original_text = fragment.raw_transcript.strip()
     if not original_text:
         raise HTTPException(400, "There are no saved words to interpret yet. Transcribe the finished recording or type the words first.")
-    draft = interpret_fragment(original_text)
+    draft = interpret_fragment(original_text, list_active_rules())
     classified_as = draft["memory_class"]
     # A prior or mixed-content Permanent call always wins over a less durable
     # automatic suggestion. The owner can still choose a different class later.
@@ -666,6 +689,12 @@ async def update_routing_review(fragment_id: int, request: Request, db: Session 
     if not selected:
         raise HTTPException(404, "That suggested item is no longer in this review.")
     selected["status"] = status
+    selected["user_choice"] = {"accepted": "confirm", "edited": "edit", "rejected": "cancel" if int(selected.get("risk_level") or 2) < 3 else "reject", "escalated": "escalate"}.get(status, status)
+    selected["user_choice_at"] = utc_now().isoformat()
+    selected.setdefault("provenance", {})
+    selected["provenance"]["userFinalChoice"] = selected["user_choice"]
+    selected["provenance"]["originalTitle"] = selected.get("title")
+    selected["provenance"]["originalDetail"] = selected.get("detail")
     if status == "edited":
         title = str(body.get("title", selected.get("title", ""))).strip()[:250]
         detail = str(body.get("detail", selected.get("detail", ""))).strip()[:4_000]
@@ -673,12 +702,33 @@ async def update_routing_review(fragment_id: int, request: Request, db: Session 
             raise HTTPException(400, "Give the edited suggestion a short title.")
         selected["title"] = title
         selected["detail"] = detail
+    acted = None
+    if status == "accepted":
+        selected["requires_confirmation"] = False
+        immutable_identity = f"{fragment.id}:{fragment.created_at.isoformat() if fragment.created_at else ''}"
+        outcomes = apply_clear_actions(
+            fragment.fragment_code,
+            [selected],
+            fragment_identity=immutable_identity,
+            fragment={
+                "id": fragment.id,
+                "created_at": fragment.created_at,
+                "raw_transcript": fragment.raw_transcript,
+                "audio_path": fragment.audio_path,
+                "source_url": f"/fragments/{fragment.id}",
+            },
+        )
+        if outcomes:
+            acted = outcomes[0]
+            if acted.get("status") == "acted":
+                selected["status"] = "acted"
+                selected["action"] = acted
     review["candidates"] = candidates
     review["updated_at"] = utc_now().isoformat()
-    review["no_changes_made"] = True
+    review["no_changes_made"] = not bool(acted and acted.get("status") == "acted")
     fragment.routing_review_json = json.dumps(review)
     db.commit()
-    return {"routing_review": review, "message": "Review saved. Nothing has been added to another app."}
+    return {"routing_review": review, "message": "Review saved. Your choice is recorded with this Fragment."}
 
 
 @app.get("/api/fragments/{fragment_id}/retention")

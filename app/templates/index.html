@@ -10,6 +10,7 @@
     <div class="voice-capture" aria-live="polite">
       <button id="recordButton" class="record-button" type="button" aria-label="Start recording"><span aria-hidden="true">●</span><span class="record-button-label">Start</span></button>
       <p id="recordStatus" class="record-status">Tap once to speak.</p>
+      <p id="outboxStatus" class="field-note" aria-live="polite" hidden></p>
       <p id="liveTranscript" class="live-preview" hidden></p>
       <p class="field-note">When you tap Stop, the recording ends. Only then do the words get transcribed.</p>
     </div>
@@ -31,4 +32,4 @@
   </section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/recorder.js?v=voice-reset-1" defer></script><script>document.querySelector('#cleanup-eligible')?.addEventListener('click',async()=>{if(!confirm('Remove only the eligible Transient Fragments and their saved audio? This cannot be undone.'))return;const r=await fetch('/api/fragments/cleanup-eligible',{method:'POST'}),b=await r.json();if(!r.ok){alert(b.error||'Could not clean up those Fragments.');return}alert(b.message);location.reload()});</script>{% endblock %}
+{% block scripts %}<script type="module" src="/static/captureOutbox.js?v=outbox-1"></script><script src="/static/recorder.js?v=outbox-1" defer></script><script>document.querySelector('#cleanup-eligible')?.addEventListener('click',async()=>{if(!confirm('Remove only the eligible Transient Fragments and their saved audio? This cannot be undone.'))return;const r=await fetch('/api/fragments/cleanup-eligible',{method:'POST'}),b=await r.json();if(!r.ok){alert(b.error||'Could not clean up those Fragments.');return}alert(b.message);location.reload()});</script>{% endblock %}

@@ -7,8 +7,12 @@ let chunks = [];
 let recognition;
 let recordedMimeType = '';
 let recordingStartedAt = 0;
+let foregroundCaptureId = null;
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+window.__fragmentsForegroundCaptureId = null;
+window.__fragmentsIsRecording = () => Boolean(recorder && recorder.state !== 'inactive');
 
 function setButtonState(recording) {
   button.classList.toggle('recording', recording);
@@ -16,6 +20,13 @@ function setButtonState(recording) {
   button.innerHTML = recording
     ? '<span aria-hidden="true">■</span><span class="record-button-label">Stop</span>'
     : '<span aria-hidden="true">●</span><span class="record-button-label">Start</span>';
+}
+
+function resetCaptureUi() {
+  chunks = [];
+  button.disabled = false;
+  setButtonState(false);
+  statusText.textContent = 'Tap once to speak.';
 }
 
 function startPreviewRecognition() {
@@ -43,6 +54,8 @@ function stopPreviewRecognition() {
 }
 
 async function startRecording() {
+  foregroundCaptureId = null;
+  window.__fragmentsForegroundCaptureId = null;
   stream = await navigator.mediaDevices.getUserMedia({audio: true});
   // Safari may record MP4 while Chromium commonly records WebM.  Ask for a
   // supported format, then keep the type the recorder actually returns.
@@ -86,19 +99,6 @@ function stopRecording() {
   recorder.stop();
 }
 
-async function transcriptionErrorMessage(response) {
-  const fallback = 'Automatic transcription could not finish just yet. The original recording is safe. Open the Fragment and try Transcribe recording again.';
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) return fallback;
-  try {
-    const body = await response.json();
-    const detail = String(body.detail || body.message || '').trim();
-    return detail || fallback;
-  } catch (_) {
-    return fallback;
-  }
-}
-
 async function saveFinishedRecording() {
   const mimeType = chunks.find(chunk => chunk.type)?.type || recordedMimeType || 'audio/webm';
   const extension = mimeType.includes('mp4') || mimeType.includes('m4a') ? 'm4a' : 'webm';
@@ -111,25 +111,40 @@ async function saveFinishedRecording() {
     setButtonState(false);
     return;
   }
-  const form = new FormData();
-  form.append('audio', blob, `fragment.${extension}`);
-  form.append('raw_transcript', '');
-  form.append('capture_mode', 'voice');
+
+  if (!window.CaptureOutbox) {
+    statusText.textContent = 'Capture storage is still loading. Please try again in a moment.';
+    button.disabled = false;
+    setButtonState(false);
+    return;
+  }
+
   try {
-    const saved = await fetch('/api/fragments', {method: 'POST', body: form});
-    if (!saved.ok) throw new Error(await saved.text());
-    const result = await saved.json();
-    statusText.textContent = 'Transcribing the finished recording…';
-    const transcription = await fetch(`/api/fragments/${result.id}/transcribe`, {method: 'POST'});
-    if (transcription.ok) {
-      window.location.assign(`${result.url}?transcribed=1`);
-      return;
-    }
-    const error = await transcriptionErrorMessage(transcription);
-    sessionStorage.setItem('bloody-daves:fragments:transcription-error', error);
-    window.location.assign(`${result.url}?transcription=not-ready`);
+    const entry = await window.CaptureOutbox.enqueue({ blob, mimeType, extension });
+    foregroundCaptureId = entry.id;
+    window.__fragmentsForegroundCaptureId = entry.id;
+    resetCaptureUi();
+    statusText.textContent = 'Saved locally. Upload will continue in the background.';
+    window.CaptureOutbox.refreshOutboxStatus?.();
+    void window.CaptureOutbox.processQueue({
+      onStatus: () => window.CaptureOutbox.refreshOutboxStatus?.(),
+      onComplete: (completedEntry, uploaded) => {
+        window.CaptureOutbox.refreshOutboxStatus?.();
+        if (completedEntry.id === foregroundCaptureId && !window.__fragmentsIsRecording()) {
+          window.location.assign(`${uploaded.url}?transcribed=1`);
+        }
+      },
+      onTranscribeFailed: (failedEntry, error, uploaded) => {
+        window.CaptureOutbox.refreshOutboxStatus?.();
+        if (failedEntry.id === foregroundCaptureId && !window.__fragmentsIsRecording()) {
+          sessionStorage.setItem('bloody-daves:fragments:transcription-error', error);
+          window.location.assign(`${uploaded.url}?transcription=not-ready`);
+        }
+      },
+      onError: () => window.CaptureOutbox.refreshOutboxStatus?.(),
+    });
   } catch (error) {
-    statusText.textContent = 'The recording could not be saved. Keep this page open and try again.';
+    statusText.textContent = 'The recording could not be saved locally. Please try again.';
     button.disabled = false;
     setButtonState(false);
     console.error(error);

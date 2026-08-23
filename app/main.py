@@ -547,7 +547,18 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
     if learning.get("clarification") and not draft["clarifications"]:
         draft["clarifications"] = [str(learning["clarification"])]
     immutable_identity = f"{fragment.id}:{fragment.created_at.isoformat() if fragment.created_at else ''}"
-    outcomes = apply_clear_actions(fragment.fragment_code, draft["candidates"], fragment_identity=immutable_identity)
+    outcomes = apply_clear_actions(
+        fragment.fragment_code,
+        draft["candidates"],
+        fragment_identity=immutable_identity,
+        fragment={
+            "id": fragment.id,
+            "created_at": fragment.created_at,
+            "raw_transcript": original_text,
+            "audio_path": fragment.audio_path,
+            "source_url": f"/fragments/{fragment.id}",
+        },
+    )
     outcome_by_candidate = {str(outcome.get("candidate_id")): outcome for outcome in outcomes}
     for candidate in draft["candidates"]:
         outcome = outcome_by_candidate.get(str(candidate.get("id")))
@@ -556,6 +567,7 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
             candidate["action"] = outcome
     review = {
         "schema": "bloody-daves/fragment-routing-review/v2",
+        "contractVersion": "v1",
         "fragment_id": fragment.id,
         "source_fragment_code": fragment.fragment_code,
         "candidates": draft["candidates"],

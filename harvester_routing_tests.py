@@ -91,4 +91,15 @@ disabled = interpret_fragment("The insurance renewals need sorting.", [{
 }])
 assert not any(item.get("metadata", {}).get("applied_rule_id") == "rule-1" for item in disabled["candidates"])
 
+# Decision language is classified, never auto-written, and stays confirm-then-act.
+for sample in (
+    "I'm thinking about changing suppliers because they keep missing deadlines.",
+    "Should we hire another person?",
+    "I need to decide whether to renew this lease.",
+):
+    routed = by_type(sample, "decision")
+    assert routed, sample
+    assert routed[0]["requires_confirmation"] is True
+    assert routed[0]["risk_level"] == 2
+
 print("Harvester routing acceptance tests passed")

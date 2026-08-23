@@ -9,9 +9,14 @@ no I/O and never writes to another Bloody Dave surface.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[misc, assignment]
 
 MEMORY_CLASSES = {"permanent", "reference", "transient", "unclassified"}
 ROUTE_TYPES = {
@@ -33,7 +38,7 @@ TRANSIENT_WORDS = re.compile(
     re.IGNORECASE,
 )
 QUESTION_START = re.compile(r"^(?:what|where|when|why|how|who|is|are|can|could|would|will|do|does|did|have|has)\b", re.IGNORECASE)
-PURCHASE = re.compile(r"\b(?:buy|get|pick up|grab)\s+(?:some\s+)?(?P<item>.+?)(?:\s+(?:tomorrow|today|this week|on \w+day|at \d)|$)", re.IGNORECASE)
+PURCHASE = re.compile(r"\b(?:buy|get|pick up|grab|add)\s+(?:some\s+)?(?P<item>.+?)(?:\s+(?:to\s+(?:the\s+)?(?:shopping\s+)?list|to\s+get\s+list|tomorrow|today|this week|on \w+day|at \d)|$)", re.IGNORECASE)
 PLACE_REMINDER = re.compile(r"\b(?:when i get home|when i get to work|next time i(?:'m| am) at the boat|when i arrive in (?P<place>[A-Za-z][A-Za-z -]{1,60}))\b", re.IGNORECASE)
 FUTURE_LANGUAGE = re.compile(r"\b(?:tomorrow|next \w+|this \w+|on \w+day|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at \d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b", re.IGNORECASE)
 MAINTENANCE_WORDS = re.compile(r"\b(?:fix|clean|service|maintain|maintenance|repair|replace|inspect|renew|insurance|licence|license|passport|registration|rego|tax|broken|dirty|filthy|needs servicing|running low|needs checking|due|expired|damaged|not working|empty tank|is out|look low)\b", re.IGNORECASE)
@@ -80,12 +85,17 @@ def _title_from_clause(clause: str) -> str:
     return _clean_title(cleaned or clause)
 
 
-def _purchase_title(clause: str) -> str:
+def _purchase_titles(clause: str) -> list[str]:
     match = PURCHASE.search(clause)
-    if not match:
-        return _title_from_clause(clause)
-    item = re.split(r"\b(?:actually|sorry|but)\b", match.group("item"), flags=re.IGNORECASE)[0]
-    return _clean_title(item).capitalize()
+    raw = match.group("item") if match else _title_from_clause(clause)
+    item = re.split(r"\b(?:actually|sorry|but)\b", raw, flags=re.IGNORECASE)[0]
+    parts = [part.strip(" .,:;—-") for part in re.split(r"\s*(?:,|\band\b|\bplus\b)\s*", item, flags=re.IGNORECASE) if part.strip(" .,:;—-")]
+    titles = [_clean_title(part).capitalize() for part in parts if part]
+    return titles or [_title_from_clause(clause)]
+
+
+def _purchase_title(clause: str) -> str:
+    return _purchase_titles(clause)[0]
 
 
 def _maintenance_title(clause: str) -> str:
@@ -106,12 +116,85 @@ def _maintenance_title(clause: str) -> str:
     return _clean_title(cleaned).capitalize()
 
 
+LEVEL_1_AUTO = {"get_list", "run_maintain", "reminder"}
+LEVEL_3_REJECT = {"ask_ai"}
+DESTRUCTIVE = re.compile(r"\b(?:delete|destroy|wipe|cancel everything|remove all|erase)\b", re.IGNORECASE)
+CLINICAL = re.compile(r"\b(?:insulin|glucose|blood sugar|a1c|hba1c|dose|medication|diabetes|diabetic|bolus|basal|carb ratio)\b", re.IGNORECASE)
+
+
+def inferred_due_date(clause: str, now: datetime | None = None) -> str | None:
+    if not re.search(r"\btomorrow\b", clause, re.IGNORECASE):
+        return None
+    current = now
+    if current is None:
+        current = datetime.now(ZoneInfo("Australia/Perth")) if ZoneInfo else datetime.now(timezone.utc)
+    return (current + timedelta(days=1)).date().isoformat()
+
+
+def apply_learned_rules(original_text: str, candidates: list[dict[str, Any]], rules: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Apply inspectable user-correction rules without inventing clinical or destructive behaviour."""
+
+    if not rules or CLINICAL.search(original_text) or DESTRUCTIVE.search(original_text):
+        return candidates
+    text = original_text.lower()
+    updated = [dict(item) for item in candidates]
+    for rule in rules:
+        if not isinstance(rule, dict) or not rule.get("active", True):
+            continue
+        terms = ((rule.get("when") or {}).get("matchTerms") if isinstance(rule.get("when"), dict) else None) or []
+        route = str(rule.get("routeTo") or "")
+        if not terms or route not in ROUTE_TYPES or route == "ask_ai":
+            continue
+        if not all(str(term).lower() in text for term in terms):
+            continue
+        reason = str(rule.get("humanReadable") or (rule.get("source") or {}).get("text") or "Learned from your correction.")
+        metadata = {
+            "applied_rule_id": rule.get("id"),
+            "applied_rule_reason": reason,
+            "originating_app": rule.get("originatingApp") or "fragments",
+        }
+        existing = next((item for item in updated if str(item.get("type")) == route), None)
+        if existing:
+            existing.setdefault("metadata", {}).update(metadata)
+            if route not in LEVEL_1_AUTO:
+                existing["requires_confirmation"] = True
+                existing["risk_level"] = 2
+            continue
+        other = next((item for item in updated if item.get("type") not in LEVEL_3_REJECT), None)
+        if other:
+            other["type"] = route
+            other["destination"] = DESTINATIONS[route]
+            other.setdefault("metadata", {}).update(metadata)
+            other["requires_confirmation"] = route not in LEVEL_1_AUTO
+            other["risk_level"] = 1 if route in LEVEL_1_AUTO else 2
+            continue
+        title = _title_from_clause(original_text)
+        updated.append(_candidate(
+            route,
+            original_text,
+            0.84,
+            title=title,
+            requires_confirmation=route not in LEVEL_1_AUTO,
+            metadata=metadata,
+        ))
+    return updated[:10]
+
+
+def risk_level_for(candidate: dict[str, Any]) -> int:
+    if candidate.get("type") in LEVEL_3_REJECT:
+        return 3
+    if candidate.get("requires_confirmation") or candidate.get("type") not in LEVEL_1_AUTO:
+        return 2
+    return 1
+
+
 def _candidate(route_type: str, clause: str, confidence: float, *, title: str | None = None, requires_confirmation: bool = False, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "id": str(uuid4()), "type": route_type, "title": title or _title_from_clause(clause),
         "detail": clause.strip(), "raw_span": clause.strip(), "confidence": round(confidence, 2),
         "requires_confirmation": requires_confirmation, "status": "proposed",
         "destination": DESTINATIONS[route_type], "metadata": metadata or {},
+        "risk_level": 3 if route_type in LEVEL_3_REJECT else 2 if requires_confirmation or route_type not in LEVEL_1_AUTO else 1,
     }
 
 
@@ -141,14 +224,17 @@ def _extract_candidates(clauses: list[str]) -> list[dict[str, Any]]:
         if _is_question(clause):
             found.append(_candidate("ask_ai", raw_clause, 0.9, title="Answer this question", metadata={"question": clause, "correction_applied": corrected}))
         else:
-            purchase = PURCHASE.search(clause)
+            purchase = PURCHASE.search(clause) or re.search(r"\b(?:shopping list|get list)\b", lower)
             if purchase:
-                found.append(_candidate("get_list", raw_clause, 0.9, title=_purchase_title(clause), metadata={"correction_applied": corrected}))
+                for title in _purchase_titles(clause):
+                    found.append(_candidate("get_list", raw_clause, 0.9, title=title, metadata={"correction_applied": corrected, "risk_level": 1}))
             place = PLACE_REMINDER.search(clause)
             explicit_reminder = re.search(r"\b(?:remind me|remember to|don't let me forget)\b", lower)
             dated_action = bool(FUTURE_LANGUAGE.search(clause) and re.search(r"\b(?:call|email|pay|renew|book|pick up|buy|fix|clean|check)\b", lower))
             if explicit_reminder or dated_action:
-                found.append(_candidate("reminder", raw_clause, 0.8, title=_title_from_clause(clause), requires_confirmation=not bool(place), metadata={"location_trigger": place.group(0) if place else None, "has_future_language": bool(FUTURE_LANGUAGE.search(clause)), "correction_applied": corrected}))
+                scheduled = bool(place) or bool(FUTURE_LANGUAGE.search(clause))
+                due_date = inferred_due_date(clause)
+                found.append(_candidate("reminder", raw_clause, 0.86 if scheduled else 0.8, title=_title_from_clause(clause), requires_confirmation=not scheduled, metadata={"location_trigger": place.group(0) if place else None, "has_future_language": bool(FUTURE_LANGUAGE.search(clause)), "due_date": due_date, "correction_applied": corrected, "risk_level": 1 if scheduled else 2}))
             if MAINTENANCE_WORDS.search(clause):
                 found.append(_candidate("run_maintain", raw_clause, 0.82, title=_maintenance_title(clause), metadata={"implied_action": not bool(re.search(r"\b(?:fix|clean|service|repair|replace|inspect|renew|check)\b", lower)), "correction_applied": corrected}))
             if WEEKLY_REVIEW.search(clause):
@@ -210,12 +296,12 @@ def clarification_questions(clauses: list[str], candidates: list[dict[str, Any]]
     return questions[:1]
 
 
-def interpret_fragment(original_text: str) -> dict[str, Any]:
+def interpret_fragment(original_text: str, rules: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Produce a reviewable, no-write Harvester interpretation for one Fragment."""
 
     normalised = normalise_text(original_text)
     clauses = split_clauses(normalised)
-    candidates = _extract_candidates(clauses)
+    candidates = apply_learned_rules(original_text, _extract_candidates(clauses), rules)
     memory_class, memory_class_reason = classify_memory(original_text, candidates)
     confidence = 0.92 if not candidates else round(sum(item["confidence"] for item in candidates) / len(candidates), 2)
     return {

@@ -16,8 +16,9 @@ from typing import Any
 import requests
 
 from app.harvester_contract import HARVESTER_CONTRACT_VERSION, build_action_request, parse_action_response
+from app.interpretation import DESTRUCTIVE
 
-ALLOWED_ROUTE_TYPES = {"get_list", "run_maintain"}
+ALLOWED_ROUTE_TYPES = {"get_list", "run_maintain", "reminder"}
 
 
 def _configured() -> tuple[str, str] | None:
@@ -34,11 +35,15 @@ def _idempotency_key(fragment_identity: str, candidate: dict[str, Any]) -> str:
 
 
 def can_act_immediately(candidate: dict[str, Any]) -> bool:
+    title = str(candidate.get("title", ""))
+    detail = str(candidate.get("detail", ""))
+    if DESTRUCTIVE.search(f"{title} {detail}"):
+        return False
     return (
         candidate.get("type") in ALLOWED_ROUTE_TYPES
         and not bool(candidate.get("requires_confirmation"))
         and float(candidate.get("confidence", 0)) >= 0.8
-        and bool(str(candidate.get("title", "")).strip())
+        and bool(title.strip())
     )
 
 
@@ -114,7 +119,7 @@ def apply_clear_actions(
                 "status": "acted",
                 "message": parsed.get("reason") or "Added.",
                 "action_id": parsed.get("action_id"),
-                "target_app": "Get List" if candidate["type"] == "get_list" else "Run & Maintain",
+                "target_app": "Get List" if candidate["type"] == "get_list" else "Hope Task" if candidate["type"] == "reminder" else "Run & Maintain",
                 "target_type": target_kind,
                 "target_id": parsed.get("resulting_entity_id"),
                 "created_target": parsed.get("idempotency_outcome") == "created",

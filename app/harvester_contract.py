@@ -33,6 +33,7 @@ def build_action_request(
             "title": str(candidate.get("title", "")).strip(),
             "detail": str(candidate.get("detail", "")).strip(),
             "domains": domains,
+            "dueDate": metadata.get("due_date"),
         },
         "idempotencyKey": idempotency_key,
         "originatingApp": ORIGINATING_APP,

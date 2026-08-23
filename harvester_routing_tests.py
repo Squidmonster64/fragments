@@ -60,4 +60,35 @@ holding = interpret_fragment("Wouldn't mind learning freediving this summer.")
 assert holding["memory_class"] == "reference"
 assert any(item["type"] == "holding" for item in holding["candidates"])
 
+# Shopping list items stay separate and exact.
+shopping_list = interpret_fragment("Add milk, coffee beans and bin bags to the shopping list.")
+assert [item["title"] for item in shopping_list["candidates"] if item["type"] == "get_list"] == ["Milk", "Coffee beans", "Bin bags"]
+assert all(item["risk_level"] == 1 for item in shopping_list["candidates"] if item["type"] == "get_list")
+
+# A scheduled reminder is Level 1 and keeps tomorrow as a date, not a guessed time.
+accountant = interpret_fragment("Remind me to call the accountant tomorrow.")
+reminders = [item for item in accountant["candidates"] if item["type"] == "reminder"]
+assert reminders and reminders[0]["requires_confirmation"] is False and reminders[0]["risk_level"] == 1
+assert reminders[0]["metadata"]["due_date"]
+assert "call the accountant" in reminders[0]["title"].lower()
+
+# Material ambiguity stays Level 2.
+ambiguous = interpret_fragment("Maybe deal with the garage later.")
+assert any(item.get("requires_confirmation") or item.get("risk_level") == 2 for item in ambiguous["candidates"])
+
+# A later similar thought uses the learned rule, and a disabled rule is ignored.
+learned = interpret_fragment("The insurance renewals need sorting.", [{
+    "id": "rule-1", "active": True, "routeTo": "run_maintain",
+    "when": {"matchTerms": ["insurance", "renewals"]},
+    "humanReadable": "For insurance renewals, use Run & Maintain.",
+    "originatingApp": "fragments",
+}])
+assert any(item["type"] == "run_maintain" and item["metadata"].get("applied_rule_id") == "rule-1" for item in learned["candidates"])
+disabled = interpret_fragment("The insurance renewals need sorting.", [{
+    "id": "rule-1", "active": False, "routeTo": "run_maintain",
+    "when": {"matchTerms": ["insurance", "renewals"]},
+    "humanReadable": "For insurance renewals, use Run & Maintain.",
+}])
+assert not any(item.get("metadata", {}).get("applied_rule_id") == "rule-1" for item in disabled["candidates"])
+
 print("Harvester routing acceptance tests passed")

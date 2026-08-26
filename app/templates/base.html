@@ -6,11 +6,14 @@
   <meta name="theme-color" content="#1d251f">
   <title>{% block title %}Bloody Dave's Fragments{% endblock %}</title>
   <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="stylesheet" href="/static/style.css?v=suite-ux-1">
+  <link rel="stylesheet" href="/static/style.css?v=suite-nav-1">
 </head>
 <body>
   <header class="topbar">
-    <a class="suite-brand" href="/"><span>Bloody Dave's</span><strong>Fragments</strong></a>
+    <div class="suite-brand">
+      <a class="family-control" href="https://control.hope-johnstone.com">5 Million Minutes</a>
+      <a class="app-home" href="/"><strong>Fragments</strong></a>
+    </div>
     <nav aria-label="Bloody Dave's Suite"><a href="https://recipes.bloodydaves.com">Recipes</a><a class="current" href="/">Fragments</a><a href="https://timer.bloodydaves.com">Quiet Timer</a><a href="https://list.bloodydaves.com">Get List</a><a href="https://lift.bloodydaves.com">Lift Log</a>{% if request.state.authenticated %}<form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>{% endif %}</nav>
   </header>
   <main>{% block content %}{% endblock %}</main>

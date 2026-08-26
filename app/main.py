@@ -25,6 +25,7 @@ from .auth import (
     valid_session,
 )
 from .harvester_actions import apply_clear_actions, undo_action
+from .capture_engine import engine_owns_run_maintain, source_created_at, submit_capture
 from .harvester_rules import learn_explicit_rules, list_active_rules, revoke_learned_rule
 from .database import Base, SessionLocal, engine
 from .interpretation import interpret_fragment, valid_memory_class
@@ -570,9 +571,19 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
     if learning.get("clarification") and not draft["clarifications"]:
         draft["clarifications"] = [str(learning["clarification"])]
     immutable_identity = f"{fragment.id}:{fragment.created_at.isoformat() if fragment.created_at else ''}"
+    engine_result = submit_capture(
+        fragment_code=fragment.fragment_code,
+        fragment_identity=immutable_identity,
+        raw_text=original_text,
+        source_type="voice" if fragment.audio_path else "typed",
+        captured_at=source_created_at(fragment.created_at),
+    )
+    immediate_candidates = draft["candidates"]
+    if engine_owns_run_maintain(engine_result):
+        immediate_candidates = [item for item in draft["candidates"] if item.get("type") != "run_maintain"]
     outcomes = apply_clear_actions(
         fragment.fragment_code,
-        draft["candidates"],
+        immediate_candidates,
         fragment_identity=immutable_identity,
         fragment={
             "id": fragment.id,
@@ -588,6 +599,7 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
         if outcome and outcome.get("status") == "acted":
             candidate["status"] = "acted"
             candidate["action"] = outcome
+    engine_applied = engine_result.get("applied") if isinstance(engine_result, dict) else None
     review = {
         "schema": "bloody-daves/fragment-routing-review/v2",
         "contractVersion": "v1",
@@ -596,9 +608,10 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
         "candidates": draft["candidates"],
         "clarifications": draft["clarifications"],
         "immediate_actions": outcomes,
+        "capture_engine": engine_result,
         "learned_rules": learning.get("rules", []),
         "state": "review",
-        "no_changes_made": not bool(outcomes) and not bool(learning.get("rules")),
+        "no_changes_made": not bool(outcomes) and not bool(learning.get("rules")) and not bool(engine_applied),
         "updated_at": utc_now().isoformat(),
     }
     fragment.interpretation_json = json.dumps(draft)
@@ -617,6 +630,22 @@ def interpret_saved_fragment(fragment_id: int, db: Session = Depends(get_db)):
         })
         if link and not any((item.get("target_app"), item.get("target_type"), item.get("target_id")) == (link["target_app"], link["target_type"], link["target_id"]) for item in links):
             links.append(link)
+    if isinstance(engine_result, dict):
+        for applied in engine_result.get("applied") or []:
+            if not isinstance(applied, dict) or not applied.get("object_id"):
+                continue
+            if applied.get("outcome") in {"rejected", "conflict"}:
+                continue
+            target_type = "structure_item" if applied.get("command") in {"object.create", "task.complete"} and applied.get("object_type") == "task" else "harvest_proposal"
+            link = normalise_link({
+                "target_app": "Hope Task",
+                "target_type": target_type,
+                "target_id": applied["object_id"],
+                "label": applied.get("reason") or applied.get("command") or "Capture Engine",
+                "state": "open",
+            })
+            if link and not any((item.get("target_app"), item.get("target_type"), item.get("target_id")) == (link["target_app"], link["target_type"], link["target_id"]) for item in links):
+                links.append(link)
     fragment.linked_actions_json = json.dumps(links)
     refresh_retention(fragment)
     db.commit()

@@ -1,35 +1,40 @@
 {% extends "base.html" %}
 {% block content %}
-<main class="workspace fragments-home">
-  <section class="recorder-card voice-card" aria-labelledby="capture-title" id="capture">
-    <div class="capture-kicker"><p class="eyebrow">FRAGMENTS / FRONT DOOR</p><span>Original words kept</span></div>
-    <h1 id="capture-title">What’s on your mind?</h1>
-    <p class="voice-intro">Say it once. We keep the recording and the words exactly as they arrived. You can decide what it means later.</p>
-    {% if request.query_params.get('deleted') %}<p class="saved">Fragment deleted.</p>{% endif %}
-    {% if request.query_params.get('imported') %}<p class="saved">{{ request.query_params.get('imported') }} fragment(s) added. Existing writing was not replaced.</p>{% endif %}
-    <div class="voice-capture" aria-live="polite">
-      <button id="recordButton" class="record-button" type="button" aria-label="Start recording"><span aria-hidden="true">●</span><span class="record-button-label">Start</span></button>
-      <p id="recordStatus" class="record-status">Tap once to speak.</p>
-      <p id="outboxStatus" class="field-note" aria-live="polite" hidden></p>
-      <p id="liveTranscript" class="live-preview" hidden></p>
-      <p class="field-note">When you tap Stop, the recording ends. Only then do the words get transcribed.</p>
-    </div>
-    <details class="typed-capture">
-      <summary><span>Or write it instead</span><small>No title or sorting needed.</small></summary>
-      <form method="post" action="/api/fragments">
-        <label class="fragment-entry-label" for="fragmentTitle">Optional title</label><input id="fragmentTitle" name="title" placeholder="Leave this blank if you like">
-        <label class="fragment-entry-label" for="fragmentText">Your words</label><textarea id="fragmentText" name="raw_transcript" rows="7" required placeholder="Type it as it comes…"></textarea>
-        <button class="save-button" type="submit">Keep these words</button>
+<main class="fragments-recovery fragments-home">
+  <section class="fragments-capture" aria-labelledby="capture-title" id="capture">
+    <header class="fragments-page-heading">
+      <h1 id="capture-title">Capture</h1>
+    </header>
+
+    {% if request.query_params.get('deleted') %}<p class="saved fragments-notice">Fragment deleted.</p>{% endif %}
+    {% if request.query_params.get('imported') %}<p class="saved fragments-notice">{{ request.query_params.get('imported') }} fragment(s) added. Existing writing was not replaced.</p>{% endif %}
+
+    <section class="fragments-capture-card" aria-label="New fragment">
+      <div class="voice-capture" aria-live="polite">
+        <button id="recordButton" class="record-button" type="button" aria-label="Start recording"><span aria-hidden="true">●</span><span class="record-button-label sr-only">Start</span></button>
+        <p id="recordStatus" class="record-status">Tap once, speak, tap again.</p>
+        <p id="outboxStatus" class="field-note" aria-live="polite" hidden></p>
+        <p id="liveTranscript" class="live-preview" hidden></p>
+      </div>
+
+      <div class="fragments-type-divider">or type instead</div>
+      <form class="fragments-typed" method="post" action="/api/fragments">
+        <label class="sr-only" for="fragmentText">Your words</label>
+        <textarea id="fragmentText" name="raw_transcript" rows="4" required placeholder="What is on your mind?"></textarea>
+        <button class="save-button" type="submit">Save text</button>
       </form>
-    </details>
+    </section>
   </section>
 
-  <section class="library" aria-labelledby="library-title">
-    <div class="library-heading"><div><p class="eyebrow">YOUR RECENT THOUGHTS</p><h2 id="library-title">Kept here.</h2><p class="library-subtitle">The newest things you said, without making you file them first.</p></div><details class="library-tools"><summary>More</summary><div class="backup-links"><a class="secondary-button" href="/export/backup">Export JSON</a><a class="secondary-button" href="/export/markdown">Export Markdown</a></div></details></div>
+  <section class="library fragments-library" aria-labelledby="library-title">
+    <div class="library-heading">
+      <div><p class="eyebrow">LIBRARY</p><h2 id="library-title">Recent fragments</h2><p class="library-subtitle">Original words stay intact. Review and routing can happen later.</p></div>
+      <details class="library-tools"><summary>More</summary><div class="backup-links"><a class="secondary-button" href="/export/backup">Export JSON</a><a class="secondary-button" href="/export/markdown">Export Markdown</a></div></details>
+    </div>
     <details class="search-drawer"><summary>Find something older</summary><div><form class="search-bar" method="get" action="/"><label class="sr-only" for="fragment-search">Search fragments</label><input id="fragment-search" name="q" value="{{ query }}" placeholder="Search the words you kept"><label class="review-toggle"><input type="checkbox" name="review" value="true" {% if review %}checked{% endif %}> Needs review</label><label class="memory-filter" for="memory-filter">Keep as<select id="memory-filter" name="memory"><option value="">All</option>{% for item in memory_classes %}<option value="{{ item }}" {% if memory == item %}selected{% endif %}>{{ item|title }}</option>{% endfor %}</select></label><button class="secondary-button" type="submit">Search</button><a class="secondary-button" href="/">Clear</a></form><form class="import-backup" method="post" action="/import/backup" enctype="multipart/form-data" onsubmit="return confirm('Imported entries will be added as new fragments. Existing writing will not be replaced. Continue?');"><label for="backup-file">Restore a backup</label><input id="backup-file" name="backup" type="file" accept="application/json,.json" required><button class="secondary-button" type="submit">Import</button></form></div></details>
     {% if eligible_cleanup_count %}<section class="cleanup-panel" id="cleanup-panel"><p class="eyebrow">READY TO CLEAN UP</p><p><strong>{{ eligible_cleanup_count }}</strong> transient fragment{% if eligible_cleanup_count != 1 %}s are{% else %} is{% endif %} eligible.</p><button class="secondary-button" id="cleanup-eligible" type="button">Remove eligible sources</button><p class="field-note">Permanent and Reference material is never included.</p></section>{% endif %}
     {% if fragments %}<div class="fragment-list">{% for f in fragments %}<a class="fragment-row" href="/fragments/{{ f.id }}"><strong>{{ f.fragment_code }}</strong><span>{{ f.title }}</span><small><span class="memory-badge memory-{{ f.memory_class }}">{{ f.memory_class|title }}</span> {{ f.processing_state|replace('_', ' ')|title }} · {{ f.status }} · updated {{ f.updated_at.strftime('%d %b %Y') }}{% if f.themes %} · {{ f.themes }}{% endif %}</small></a>{% endfor %}</div>{% else %}<p class="empty-state">{% if query or review or memory %}Nothing matches that search.{% else %}Nothing kept yet. Say the first thing that matters.{% endif %}</p>{% endif %}
   </section>
 </main>
 {% endblock %}
-{% block scripts %}<script type="module" src="/static/captureOutbox.js?v=outbox-2"></script><script src="/static/recorder.js?v=outbox-2" defer></script><script>document.querySelector('#cleanup-eligible')?.addEventListener('click',async()=>{if(!confirm('Remove only the eligible Transient Fragments and their saved audio? This cannot be undone.'))return;const r=await fetch('/api/fragments/cleanup-eligible',{method:'POST'}),b=await r.json();if(!r.ok){alert(b.error||'Could not clean up those Fragments.');return}alert(b.message);location.reload()});</script>{% endblock %}
+{% block scripts %}<script type="module" src="/static/captureOutbox.js?v=suite-recovery-1"></script><script src="/static/recorder.js?v=suite-recovery-1" defer></script><script>document.querySelector('#cleanup-eligible')?.addEventListener('click',async()=>{if(!confirm('Remove only the eligible Transient Fragments and their saved audio? This cannot be undone.'))return;const r=await fetch('/api/fragments/cleanup-eligible',{method:'POST'}),b=await r.json();if(!r.ok){alert(b.error||'Could not clean up those Fragments.');return}alert(b.message);location.reload()});</script>{% endblock %}

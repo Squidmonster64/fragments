@@ -1,19 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Sign in — Bloody Dave's Fragments{% endblock %}
+{% block title %}Sign in — Fragments{% endblock %}
 {% block content %}
-<section class="editor">
-  <div class="editor-heading">
-    <div><p class="eyebrow">PRIVATE LIBRARY</p><h1>Sign in to Fragments</h1></div>
+<section class="fragments-auth-shell">
+  <div class="fragments-auth-card">
+    <p class="eyebrow">5 MILLION MINUTES</p>
+    <h1>Fragments</h1>
+    {% if not configured %}
+      <div class="fragments-infra-error" role="alert">
+        <strong>Fragments is temporarily unavailable.</strong>
+        <p>The server session is not ready. This is an infrastructure fault, not something to configure here.</p>
+        <a class="secondary-button" href="https://control.hope-johnstone.com">Return to Control</a>
+      </div>
+    {% else %}
+      {% if invalid %}<p class="saved warning">That passphrase was not accepted.</p>{% endif %}
+      <form method="post" action="/auth/login">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label>Passphrase<input name="passphrase" type="password" autocomplete="current-password" required autofocus></label>
+        <button class="save-button" type="submit">Continue</button>
+      </form>
+      <p class="fragments-auth-note">Normally this session stays signed in on this device.</p>
+    {% endif %}
   </div>
-  {% if not configured %}
-    <p class="saved warning">Authentication is not configured on the server. Set <code>FRAGMENTS_AUTH_PASSPHRASE</code> before using the private library.</p>
-  {% else %}
-    {% if invalid %}<p class="saved warning">That passphrase was not accepted.</p>{% endif %}
-    <form method="post" action="/auth/login">
-      <input type="hidden" name="next" value="{{ next }}">
-      <label>Private passphrase<input name="passphrase" type="password" autocomplete="current-password" required autofocus></label>
-      <button class="save-button" type="submit">Sign in</button>
-    </form>
-  {% endif %}
 </section>
 {% endblock %}

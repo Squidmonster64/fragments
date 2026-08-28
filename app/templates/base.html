@@ -3,18 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1d251f">
-  <title>{% block title %}Bloody Dave's Fragments{% endblock %}</title>
+  <meta name="theme-color" content="#f5f1e7">
+  <title>{% block title %}Fragments — 5 Million Minutes{% endblock %}</title>
   <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="stylesheet" href="/static/style.css?v=suite-ux-1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=suite-recovery-1">
+  <link rel="stylesheet" href="/static/fragments-recovery.css?v=suite-recovery-1">
 </head>
-<body>
-  <header class="topbar">
-    <a class="suite-brand" href="/"><span>Bloody Dave's</span><strong>Fragments</strong></a>
-    <nav aria-label="Bloody Dave's Suite"><a href="https://recipes.bloodydaves.com">Recipes</a><a class="current" href="/">Fragments</a><a href="https://timer.bloodydaves.com">Quiet Timer</a><a href="https://list.bloodydaves.com">Get List</a><a href="https://lift.bloodydaves.com">Lift Log</a>{% if request.state.authenticated %}<form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>{% endif %}</nav>
+<body class="fragments-suite">
+  <header class="topbar fragments-suite-header">
+    <div class="suite-brand">
+      <a class="family-control" href="https://control.hope-johnstone.com">5 Million Minutes</a>
+      <a class="app-home" href="/"><strong>Fragments</strong></a>
+    </div>
+    <nav class="fragments-suite-nav" aria-label="Fragments">
+      <a href="https://control.hope-johnstone.com">Control</a>
+      {% if request.state.authenticated %}<form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>{% endif %}
+    </nav>
   </header>
-  <main>{% block content %}{% endblock %}</main>
-  <footer class="suite-footer">Part of the independently run Bloody Dave's Suite.</footer>
+  <div id="fragmentsApp">{% block content %}{% endblock %}</div>
+  <footer class="suite-footer fragments-suite-footer">5 Million Minutes · Fragments</footer>
   <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/static/service-worker.js');</script>
   {% block scripts %}{% endblock %}
 </body>

@@ -23,7 +23,7 @@
       {% if request.state.authenticated %}<form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>{% endif %}
     </nav>
   </header>
-  <main>{% block content %}{% endblock %}</main>
+  <div id="fragmentsApp">{% block content %}{% endblock %}</div>
   <footer class="suite-footer fragments-suite-footer">5 Million Minutes · Fragments</footer>
   <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/static/service-worker.js');</script>
   {% block scripts %}{% endblock %}

@@ -51,6 +51,10 @@ body.fragments-suite { margin: 0; background: var(--fr-bg); color: var(--fr-text
 .fragments-infra-error p, .fragments-auth-note { color: var(--fr-muted); line-height: 1.45; }
 .fragments-auth-note { margin: 16px 0 0; font-size: 12px; }
 
+/* Capture routing is server-to-server after the owner has entered Fragments.
+   The legacy per-fragment Hope Task login is no longer a user-facing step. */
+#live-sync { display: none !important; }
+
 @media (max-width: 699px) {
   .fragments-suite-header { min-height: 58px; padding-left: 18px; padding-right: 18px; }
   .fragments-suite-nav form { display: none; }

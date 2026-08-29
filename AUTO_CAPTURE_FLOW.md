@@ -1,0 +1,1 @@
+Fragments should require one owner login only. Once inside Fragments, typed or voice capture must be preserved first and then routed automatically through the existing Capture Engine server-to-server handoff. The old per-fragment Hope Task live-sync passphrase is not part of the capture path.

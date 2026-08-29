@@ -10,7 +10,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css?v=suite-recovery-1">
-  <link rel="stylesheet" href="/static/fragments-recovery.css?v=suite-recovery-1">
+  <link rel="stylesheet" href="/static/fragments-recovery.css?v=one-login-1">
+  <script>
+    try {
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key && key.startsWith('bloody-daves:fragment-sync:')) localStorage.removeItem(key);
+      }
+    } catch (_) {}
+  </script>
 </head>
 <body class="fragments-suite">
   <header class="topbar fragments-suite-header">

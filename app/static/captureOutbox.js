@@ -82,18 +82,23 @@ const indexedDbStore = {
   },
 };
 
-async function transcriptionErrorMessage(response) {
-  const fallback =
-    'Automatic transcription could not finish just yet. The original recording is safe. Open the Fragment and try Transcribe recording again.';
+async function responseErrorMessage(response, fallback) {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) return fallback;
   try {
     const body = await response.json();
-    const detail = String(body.detail || body.message || '').trim();
+    const detail = String(body.detail || body.message || body.error || '').trim();
     return detail || fallback;
   } catch (_) {
     return fallback;
   }
+}
+
+async function transcriptionErrorMessage(response) {
+  return responseErrorMessage(
+    response,
+    'Automatic transcription could not finish just yet. The original recording is safe. Open the Fragment and try Transcribe recording again.',
+  );
 }
 
 async function uploadCapture(entry) {
@@ -131,9 +136,32 @@ async function transcribeCapture(entry) {
   return { ok: false, error: await transcriptionErrorMessage(response) };
 }
 
+async function routeCapture(entry) {
+  const fallback = 'The Fragment is safe, but automatic routing did not finish. It will retry.';
+  const response = await fetch(`/api/fragments/${entry.serverFragmentId}/interpret`, {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    return { ok: false, error: await responseErrorMessage(response, fallback) };
+  }
+  let body;
+  try {
+    body = await response.json();
+  } catch (_) {
+    return { ok: false, error: fallback };
+  }
+  const engine = body?.routing_review?.capture_engine;
+  if (!engine || engine.accepted !== true) {
+    return { ok: false, error: engine?.message || fallback };
+  }
+  return { ok: true, body };
+}
+
 const controller = createOutboxController(indexedDbStore, {
   uploadCapture,
   transcribeCapture,
+  routeCapture,
 });
 
 window.CaptureOutbox = {
@@ -168,7 +196,7 @@ async function refreshOutboxStatus() {
 window.CaptureOutbox.refreshOutboxStatus = refreshOutboxStatus;
 
 function bindTypedCapture() {
-  const form = document.querySelector('.typed-capture form');
+  const form = document.querySelector('form.fragments-typed');
   if (!form || form.dataset.outboxBound) return;
   form.dataset.outboxBound = 'true';
   form.addEventListener('submit', async event => {
@@ -182,6 +210,7 @@ function bindTypedCapture() {
     void controller.processQueue({
       onStatus: () => refreshOutboxStatus(),
       onComplete: () => refreshOutboxStatus(),
+      onRouteFailed: () => refreshOutboxStatus(),
       onError: () => refreshOutboxStatus(),
     });
   });
@@ -195,7 +224,7 @@ function bindOutboxLifecycle() {
       onComplete: (entry, uploaded) => {
         refreshOutboxStatus();
         if (entry.id === window.__fragmentsForegroundCaptureId && !window.__fragmentsIsRecording?.()) {
-          window.location.assign(`${uploaded.url}?transcribed=1`);
+          window.location.assign(`${uploaded.url}?transcribed=1&routed=1`);
         }
       },
       onTranscribeFailed: (entry, error, uploaded) => {
@@ -205,6 +234,7 @@ function bindOutboxLifecycle() {
           window.location.assign(`${uploaded.url}?transcription=not-ready`);
         }
       },
+      onRouteFailed: () => refreshOutboxStatus(),
       onError: () => refreshOutboxStatus(),
     });
   };

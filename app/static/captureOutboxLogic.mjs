@@ -7,9 +7,9 @@ export const OUTBOX_STATUS = {
 
 export const OUTBOX_STATUS_LABEL = {
   [OUTBOX_STATUS.SAVED_LOCALLY]: 'Saved locally',
-  [OUTBOX_STATUS.UPLOADING]: 'Uploading',
-  [OUTBOX_STATUS.SYNCED]: 'Synced',
-  [OUTBOX_STATUS.NEEDS_RETRY]: 'Needs retry',
+  [OUTBOX_STATUS.UPLOADING]: 'Routing',
+  [OUTBOX_STATUS.SYNCED]: 'Captured and routed',
+  [OUTBOX_STATUS.NEEDS_RETRY]: 'Saved · routing needs retry',
 };
 
 export function shouldUpload(entry) {
@@ -31,6 +31,7 @@ export function buildCaptureEntry({ id, blob, mimeType, extension, createdAt = D
     lastError: null,
     serverFragmentId: null,
     fragmentUrl: null,
+    transcriptionComplete: kind === 'typed',
   };
 }
 
@@ -40,6 +41,27 @@ export function buildTypedCaptureEntry({ id, rawText, title = '', createdAt = Da
 
 export function isTypedCapture(entry) {
   return entry?.kind === 'typed';
+}
+
+async function routeOrRetry(current, deps) {
+  const routing = await deps.routeCapture(current);
+  if (routing?.ok) return null;
+  const error = routing?.error || 'The Fragment is safe, but routing did not finish. It will retry.';
+  await deps.updateEntry(current.id, {
+    status: OUTBOX_STATUS.NEEDS_RETRY,
+    lastError: error,
+    retryCount: (current.retryCount || 0) + 1,
+  });
+  return {
+    entry: {
+      ...current,
+      status: OUTBOX_STATUS.NEEDS_RETRY,
+      lastError: error,
+      retryCount: (current.retryCount || 0) + 1,
+    },
+    outcome: 'route_failed',
+    uploaded: { id: current.serverFragmentId, url: current.fragmentUrl },
+  };
 }
 
 async function processTypedCapture(entry, deps) {
@@ -54,6 +76,7 @@ async function processTypedCapture(entry, deps) {
       fragmentUrl: uploaded.url,
       status: OUTBOX_STATUS.UPLOADING,
       lastError: null,
+      transcriptionComplete: true,
     });
     current = {
       ...current,
@@ -61,8 +84,11 @@ async function processTypedCapture(entry, deps) {
       fragmentUrl: uploaded.url,
       status: OUTBOX_STATUS.UPLOADING,
       lastError: null,
+      transcriptionComplete: true,
     };
   }
+  const routeFailure = await routeOrRetry(current, deps);
+  if (routeFailure) return routeFailure;
   await updateEntry(current.id, { status: OUTBOX_STATUS.SYNCED, lastError: null });
   await removeEntry(current.id);
   return {
@@ -105,24 +131,31 @@ export async function processCaptureEntry(entry, deps) {
     };
   }
 
-  const transcription = await transcribeCapture(current);
-  if (!transcription.ok) {
-    await updateEntry(current.id, {
-      status: OUTBOX_STATUS.NEEDS_RETRY,
-      lastError: transcription.error,
-      retryCount: current.retryCount + 1,
-    });
-    return {
-      entry: {
-        ...current,
+  if (!current.transcriptionComplete) {
+    const transcription = await transcribeCapture(current);
+    if (!transcription.ok) {
+      await updateEntry(current.id, {
         status: OUTBOX_STATUS.NEEDS_RETRY,
         lastError: transcription.error,
         retryCount: current.retryCount + 1,
-      },
-      outcome: 'transcribe_failed',
-      uploaded: { id: current.serverFragmentId, url: current.fragmentUrl },
-    };
+      });
+      return {
+        entry: {
+          ...current,
+          status: OUTBOX_STATUS.NEEDS_RETRY,
+          lastError: transcription.error,
+          retryCount: current.retryCount + 1,
+        },
+        outcome: 'transcribe_failed',
+        uploaded: { id: current.serverFragmentId, url: current.fragmentUrl },
+      };
+    }
+    await updateEntry(current.id, { transcriptionComplete: true, lastError: null });
+    current = { ...current, transcriptionComplete: true, lastError: null };
   }
+
+  const routeFailure = await routeOrRetry(current, deps);
+  if (routeFailure) return routeFailure;
 
   await updateEntry(current.id, { status: OUTBOX_STATUS.SYNCED, lastError: null });
   await removeEntry(current.id);
@@ -176,6 +209,9 @@ export function createOutboxController(store, network = {}) {
     (async () => {
       throw new Error('transcribeCapture not configured');
     });
+  const routeCapture =
+    network.routeCapture ||
+    (async () => ({ ok: true }));
 
   async function enqueue(input) {
     const id = crypto.randomUUID();
@@ -202,6 +238,7 @@ export function createOutboxController(store, network = {}) {
           const result = await processCaptureEntry(entry, {
             uploadCapture,
             transcribeCapture,
+            routeCapture,
             updateEntry: (id, patch) => store.update(id, patch),
             removeEntry: id => store.remove(id),
           });
@@ -210,6 +247,8 @@ export function createOutboxController(store, network = {}) {
             handlers.onComplete?.(result.entry, result.uploaded);
           } else if (result.outcome === 'transcribe_failed') {
             handlers.onTranscribeFailed?.(result.entry, result.entry.lastError, result.uploaded);
+          } else if (result.outcome === 'route_failed') {
+            handlers.onRouteFailed?.(result.entry, result.entry.lastError, result.uploaded);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

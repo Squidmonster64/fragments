@@ -1,1 +1,0 @@
-Implementation touches only the Fragments capture/outbox presentation path. It does not change `app/capture_engine.py` classification or Hope Task owner semantics. The existing `/interpret` endpoint already performs the server-to-server handoff; the outbox now calls it automatically after preservation/transcription.
